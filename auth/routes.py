@@ -131,7 +131,7 @@ def register():
     else:
         # Company required for everyone else
         if 'company_subdomain' in data:
-            company = Company.query.filter(func.lower(Company.subdomain) == data['company_subdomain'].lower()).first()
+            company = Company.query.filter(func.lower(Company.subdomain) == data['company_subdomain'].strip().lower()).first()
         elif 'company_id' in data:
             company = Company.query.get(data['company_id'])
         else:
