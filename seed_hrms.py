@@ -93,6 +93,7 @@ def seed_employee_new_schema(db_path, name, email, password, role, department="G
 
 with app.app_context():
     print("🚀 Seeding HRMS Database...")
+    print(f"📂 Using Database: {app.config['SQLALCHEMY_DATABASE_URI']}")
     
     # 1. Create master.db tables
     db.create_all()
@@ -123,22 +124,10 @@ with app.app_context():
     # 3. Create sample companies
     companies_data = [
         {
-            "name": "Aparna Corporation",
-            "subdomain": "aparna",
-            "admin_email": "adminaparna@gmail.com",
-            "admin_password": "admin123"
-        },
-        {
-            "name": "Tech Solutions Ltd",
-            "subdomain": "tech",
-            "admin_email": "admin@tech.com",
-            "admin_password": "admin123"
-        },
-        {
-            "name": "Global Enterprises",
-            "subdomain": "global",
-            "admin_email": "admin@global.com",
-            "admin_password": "admin123"
+            "name": "Future Invo Solutions",
+            "subdomain": "futureinvo",
+            "admin_email": "admin@futureinvo.com",
+            "admin_password": "password123"
         }
     ]
     
@@ -177,6 +166,7 @@ with app.app_context():
             )
             
             print(f"✅ Company '{company_data['name']}' created")
+            print(f"   ID: {company.id}")
             print(f"   Subdomain: {company_data['subdomain']}")
             print(f"   Admin Email: {company_data['admin_email']}")
             print(f"   Admin Password: {company_data['admin_password']}")

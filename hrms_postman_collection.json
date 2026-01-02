@@ -1,7 +1,7 @@
 {
 	"info": {
-		"_postman_id": "b6a7b8c9-d0e1-4f2a-9b3c-5d6e7f8a9b0c",
-		"name": "HRMS Multi-Tenant API",
+		"name": "HRMS API Collection",
+		"_postman_id": "hrms-collection-002",
 		"description": "Collection for HRMS API endpoints including Auth, Admin, and Superadmin modules.",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
@@ -9,6 +9,38 @@
 		{
 			"name": "Auth",
 			"item": [
+				{
+					"name": "Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john@futureinvo.com\",\n    \"password\": \"Password123\",\n    \"company_subdomain\": \"futureinvo\",\n    \"role\": \"EMPLOYEE\",\n    \"department\": \"IT\",\n    \"designation\": \"Developer\",\n    \"phone\": \"9876543210\",\n    \"date_of_joining\": \"2026-01-01\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/register",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
+						}
+					}
+				},
 				{
 					"name": "Login",
 					"event": [
@@ -19,6 +51,10 @@
 									"var jsonData = pm.response.json();",
 									"if (jsonData.token) {",
 									"    pm.collectionVariables.set(\"token\", jsonData.token);",
+									"    if (jsonData.role === 'SUPER_ADMIN') pm.collectionVariables.set(\"superadmin_token\", jsonData.token);",
+									"    if (jsonData.role === 'ADMIN') pm.collectionVariables.set(\"admin_token\", jsonData.token);",
+									"    if (jsonData.role === 'HR') pm.collectionVariables.set(\"hr_token\", jsonData.token);",
+									"    if (jsonData.role === 'EMPLOYEE') pm.collectionVariables.set(\"employee_token\", jsonData.token);",
 									"    console.log(\"Token updated\");",
 									"}"
 								],
@@ -31,7 +67,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"email\": \"adminaparna@gmail.com\",\n    \"password\": \"admin123\"\n}",
+							"raw": "{\n    \"email\": \"admin@futureinvo.com\",\n    \"password\": \"password123\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -39,12 +75,11 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/auth/login",
+							"raw": "{{base_url}}/auth/login",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
 								"auth",
 								"login"
 							]
@@ -52,34 +87,7 @@
 					}
 				},
 				{
-					"name": "Register",
-					"request": {
-						"method": "POST",
-						"header": [],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john.doe@aparna.com\",\n    \"password\": \"password123\",\n    \"company_subdomain\": \"aparna\",\n    \"role\": \"EMPLOYEE\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/auth/register",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"auth",
-								"register"
-							]
-						}
-					}
-				},
-				{
-					"name": "Profile",
+					"name": "Get Me",
 					"request": {
 						"method": "GET",
 						"header": [
@@ -90,65 +98,25 @@
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/auth/profile",
+							"raw": "{{base_url}}/auth/me",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
 								"auth",
-								"profile"
+								"me"
 							]
 						}
 					}
 				},
 				{
-					"name": "Logout",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/auth/logout",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"auth",
-								"logout"
-							]
-						}
-					}
-				},
-				{
-					"name": "Forgot Password",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"var jsonData = pm.response.json();",
-									"if (jsonData.mock_token) {",
-									"    pm.collectionVariables.set(\"reset_token\", jsonData.mock_token);",
-									"    console.log(\"Reset token captured\");",
-									"}"
-								],
-								"type": "text/javascript"
-							}
-						}
-					],
+					"name": "Send OTP",
 					"request": {
 						"method": "POST",
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"email\": \"adminaparna@gmail.com\"\n}",
+							"raw": "{\n    \"email\": \"admin@futureinvo.com\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -156,14 +124,39 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/auth/forgot-password",
+							"raw": "{{base_url}}/auth/send-otp",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
 								"auth",
-								"forgot-password"
+								"send-otp"
+							]
+						}
+					}
+				},
+				{
+					"name": "Verify OTP",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"admin@futureinvo.com\",\n    \"otp\": \"123456\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/verify-otp",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"verify-otp"
 							]
 						}
 					}
@@ -175,7 +168,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"token\": \"{{reset_token}}\",\n    \"new_password\": \"newpassword123\"\n}",
+							"raw": "{\n    \"email\": \"admin@futureinvo.com\",\n    \"otp\": \"123456\",\n    \"new_password\": \"NewPass123\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -183,12 +176,11 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/auth/reset-password",
+							"raw": "{{base_url}}/auth/reset-password",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
 								"auth",
 								"reset-password"
 							]
@@ -196,7 +188,7 @@
 					}
 				},
 				{
-					"name": "Change Password",
+					"name": "Update Password",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -208,7 +200,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"current_password\": \"admin123\",\n    \"new_password\": \"newpassword123\"\n}",
+							"raw": "{\n    \"old_password\": \"password123\",\n    \"new_password\": \"NewPassword123\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -216,413 +208,185 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/auth/change-password",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"auth",
-								"change-password"
-							]
+							"raw": "{{base_url}}/auth/update-password",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "update-password"]
 						}
 					}
 				}
 			]
 		},
-		{
-			"name": "Admin",
-			"item": [
-				{
-					"name": "Get All Employees",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/employees",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"employees"
-							]
-						}
-					}
-				},
-				{
-					"name": "Create Employee",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"name\": \"New User\",\n    \"email\": \"new.user@aparna.com\",\n    \"password\": \"password123\",\n    \"role\": \"EMPLOYEE\",\n    \"department\": \"IT\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/admin/employee",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"employee"
-							]
-						}
-					}
-				},
-				{
-					"name": "Get Employee by ID",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/employee/1",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"employee",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Approve User",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/approve-user/2",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"approve-user",
-								"2"
-							]
-						}
-					}
-				},
-				{
-					"name": "Update Employee",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"department\": \"Marketing\",\n    \"status\": \"ACTIVE\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/admin/employee/1",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"employee",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Delete Employee",
-					"request": {
-						"method": "DELETE",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/employee/1",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"employee",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Get Pending Approvals",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/admin/pending-approvals",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"admin",
-								"pending-approvals"
-							]
-						}
-					}
-				}
-			]
-		},
-		{
-			"name": "Superadmin",
-			"item": [
-				{
-					"name": "Create Company",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"name\": \"New Corp\",\n    \"subdomain\": \"newcorp\",\n    \"admin_email\": \"admin@newcorp.com\",\n    \"admin_password\": \"admin123\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/superadmin/create-company",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"superadmin",
-								"create-company"
-							]
-						}
-					}
-				},
-				{
-					"name": "Get Companies",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/superadmin/companies",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"superadmin",
-								"companies"
-							]
-						}
-					}
-				}
-			]
-		},
+        {
+            "name": "Super Admin",
+            "item": [
+                {
+                    "name": "Create Company",
+                    "request": {
+                        "method": "POST",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{superadmin_token}}", "type": "text" } ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"New Company\",\n    \"subdomain\": \"newco\",\n    \"admin_email\": \"admin@newco.com\",\n    \"admin_password\": \"admin123\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": { "raw": "{{base_url}}/superadmin/create-company", "host": ["{{base_url}}"], "path": ["superadmin", "create-company"] }
+                    }
+                },
+                {
+                    "name": "Get Companies",
+                    "request": {
+                        "method": "GET",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{superadmin_token}}", "type": "text" } ],
+                        "url": { "raw": "{{base_url}}/superadmin/companies", "host": ["{{base_url}}"], "path": ["superadmin", "companies"] }
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Admin",
+            "item": [
+                {
+                    "name": "Get Employees",
+                    "request": {
+                        "method": "GET",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "url": { "raw": "{{base_url}}/admin/employees", "host": ["{{base_url}}"], "path": ["admin", "employees"] }
+                    }
+                },
+                {
+                    "name": "Create Employee",
+                    "request": {
+                        "method": "POST",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"name\": \"Alice Smith\",\n    \"email\": \"alice@futureinvo.com\",\n    \"role\": \"EMPLOYEE\",\n    \"department\": \"Sales\",\n    \"designation\": \"Executive\",\n    \"phone\": \"1234567890\",\n    \"doj\": \"2026-02-01\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": { "raw": "{{base_url}}/admin/employee", "host": ["{{base_url}}"], "path": ["admin", "employee"] }
+                    }
+                },
+                {
+                    "name": "Approve User",
+                    "request": {
+                        "method": "POST",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "url": { "raw": "{{base_url}}/admin/approve-user/2", "host": ["{{base_url}}"], "path": ["admin", "approve-user", "2"] }
+                    }
+                }
+            ]
+        },
 		{
 			"name": "Employee",
 			"item": [
 				{
-					"name": "List Employees",
+					"name": "Get My Profile",
 					"request": {
 						"method": "GET",
 						"header": [
 							{
 								"key": "Authorization",
-								"value": "Bearer {{token}}",
+								"value": "Bearer {{employee_token}}",
 								"type": "text"
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/employees/",
+							"raw": "{{base_url}}/employee/profile",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
-								"employees",
-								""
+								"employee",
+								"profile"
 							]
 						}
 					}
 				},
 				{
-					"name": "Get Employee Details",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/employees/1",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"employees",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Create Employee (Generic)",
+					"name": "Mark Attendance",
 					"request": {
 						"method": "POST",
 						"header": [
 							{
 								"key": "Authorization",
-								"value": "Bearer {{token}}",
+								"value": "Bearer {{employee_token}}",
 								"type": "text"
 							}
 						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"name\": \"Generic User\",\n    \"email\": \"generic@aparna.com\",\n    \"password\": \"password123\",\n    \"role\": \"EMPLOYEE\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
 						"url": {
-							"raw": "{{base_url}}/api/employees/",
+							"raw": "{{base_url}}/employee/attendance",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
-								"employees",
-								""
+								"employee",
+								"attendance"
+							]
+						}
+					}
+				}
+            ]
+        },
+        {
+            "name": "Employee Documents",
+            "item": [
+                {
+					"name": "Upload Document",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{employee_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								},
+								{
+									"key": "document_type",
+									"value": "Identity Proof",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/employee-documents/upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"employee-documents",
+								"upload"
 							]
 						}
 					}
 				},
 				{
-					"name": "Update Employee (Generic)",
+					"name": "List Documents",
 					"request": {
-						"method": "PUT",
+						"method": "GET",
 						"header": [
 							{
 								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"name\": \"Updated Name\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/employees/1",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"employees",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Delete Employee (Generic)",
-					"request": {
-						"method": "DELETE",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
+								"value": "Bearer {{employee_token}}",
 								"type": "text"
 							}
 						],
 						"url": {
-							"raw": "{{base_url}}/api/employees/1",
+							"raw": "{{base_url}}/employee-documents/list/1",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
-								"api",
-								"employees",
+								"employee-documents",
+								"list",
 								"1"
 							]
 						}
@@ -634,7 +398,7 @@
 	"variable": [
 		{
 			"key": "base_url",
-			"value": "http://localhost:5000",
+			"value": "http://localhost:5000/api",
 			"type": "string"
 		},
 		{
@@ -643,7 +407,22 @@
 			"type": "string"
 		},
 		{
-			"key": "reset_token",
+			"key": "superadmin_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "admin_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "hr_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "employee_token",
 			"value": "",
 			"type": "string"
 		}

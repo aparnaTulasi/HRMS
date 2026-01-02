@@ -1,4 +1,5 @@
 # c:\Users\DELL5410\Desktop\HRMS\app.py
+import os
 
 from flask import Flask
 from flask_cors import CORS
@@ -16,6 +17,10 @@ from employee.employee_documents import employee_documents_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
+# Ensure absolute path for master.db to avoid duplicates
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(BASE_DIR, 'master.db')}"
 
 # Enable CORS
 CORS(
@@ -85,6 +90,6 @@ if __name__ == "__main__":
         print("✅ Tables in DB:", inspector.get_table_names())
 
         if not UserMaster.query.first():
-            print("\n⚠️ WARNING: Database is empty\n")
+            print("\n⚠️ WARNING: Database is empty. Run 'python seed_hrms.py' to populate it.\n")
 
     app.run(debug=True, port=5000)
