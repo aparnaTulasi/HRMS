@@ -7,12 +7,14 @@ from sqlalchemy import inspect
 
 from config import Config
 from models.master import db, UserMaster
+from models.master_employee import Employee
 
 # Blueprints
 from auth.routes import auth_bp
 from superadmin.routes import superadmin_bp
 from employee.employee_routes import employee_bp
 from admin.routes import admin_bp
+from hr.routes import hr_bp
 from employee.employee_documents import employee_documents_bp
 
 app = Flask(__name__)
@@ -21,6 +23,9 @@ app.config.from_object(Config)
 # Ensure absolute path for master.db to avoid duplicates
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 app.config["SQLALCHEMY_DATABASE_URI"] = f"sqlite:///{os.path.join(BASE_DIR, 'master.db')}"
+
+# Debug: Print the actual database path on startup to verify location
+print(f"\n✅ REAL DB PATH: {app.config['SQLALCHEMY_DATABASE_URI']}\n")
 
 # Enable CORS
 CORS(
@@ -42,6 +47,7 @@ app.register_blueprint(auth_bp, url_prefix="/api/auth")
 app.register_blueprint(superadmin_bp, url_prefix="/api/superadmin")
 app.register_blueprint(employee_bp, url_prefix="/api/employee")
 app.register_blueprint(admin_bp, url_prefix="/api/admin")
+app.register_blueprint(hr_bp, url_prefix="/api/hr")
 app.register_blueprint(employee_documents_bp, url_prefix="/api/employee-documents")
 
 # Home Route (ENDPOINTS LIST INCLUDED ✅)
@@ -55,7 +61,9 @@ def home():
                 "register": "POST /api/auth/register",
                 "login": "POST /api/auth/login",
                 "logout": "POST /api/auth/logout",
-                "profile": "GET /api/auth/profile"
+                "profile": "GET /api/auth/profile",
+                "get_master_employees": "GET /api/auth/master-employees",
+                "sync_employees": "POST /api/auth/sync-employees"
             },
             "superadmin": {
                 "create_company": "POST /api/superadmin/create-company",
@@ -68,7 +76,16 @@ def home():
                 "delete_employee": "DELETE /api/admin/employee/<id>",
                 "get_employee": "GET /api/admin/employee/<id>",
                 "get_employees": "GET /api/admin/employees",
-                "approve_user": "POST /api/admin/approve-user/<id>"
+                "approve_user": "POST /api/admin/approve-user/<id>",
+                "dashboard_stats": "GET /api/admin/dashboard-stats",
+                "verify_document": "PUT /api/admin/document/<id>/verify"
+            },
+            "hr": {
+                "get_employees": "GET /api/hr/employees",
+                "get_employee": "GET /api/hr/employee/<id>",
+                "update_employee": "PUT /api/hr/employee/<id>",
+                "delete_employee": "DELETE /api/hr/employee/<id>",
+                "get_departments": "GET /api/hr/departments"
             },
             "employee": {
                 "profile": "GET /api/employee/profile",
@@ -76,7 +93,7 @@ def home():
             },
             "employee_documents": {
                 "upload": "POST /api/employee-documents/upload",
-                "list": "GET /api/employee-documents",
+                "list": "GET /api/employee-documents/my-documents",
                 "delete": "DELETE /api/employee-documents/<id>"
             }
         }

@@ -42,6 +42,74 @@
 					}
 				},
 				{
+					"name": "Register (Self-Service)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Self Registered\",\n    \"email\": \"self@futureinvo.com\",\n    \"password\": \"password123\",\n    \"role\": \"EMPLOYEE\",\n    \"company_subdomain\": \"futureinvo\",\n    \"department\": \"IT\",\n    \"designation\": \"Intern\",\n    \"phone\": \"9988776655\",\n    \"date_of_joining\": \"2026-06-01\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/register",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
+						}
+					}
+				},
+				{
+					"name": "Login (Varshi)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set(\"token\", jsonData.token);",
+									"    pm.collectionVariables.set(\"employee_token\", jsonData.token);",
+									"    console.log(\"Employee Token updated\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"varshi@futureinvo.com\",\n    \"password\": \"password123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					}
+				},
+				{
 					"name": "Login",
 					"event": [
 						{
@@ -226,7 +294,7 @@
                         "header": [ { "key": "Authorization", "value": "Bearer {{superadmin_token}}", "type": "text" } ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"name\": \"New Company\",\n    \"subdomain\": \"newco\",\n    \"admin_email\": \"admin@newco.com\",\n    \"admin_password\": \"admin123\"\n}",
+                            "raw": "{\n    \"company_name\": \"Future Invo Solutions\",\n    \"subdomain\": \"futureinvo\",\n    \"admin_email\": \"admin@futureinvo.com\",\n    \"admin_password\": \"password123\"\n}",
                             "options": { "raw": { "language": "json" } }
                         },
                         "url": { "raw": "{{base_url}}/superadmin/create-company", "host": ["{{base_url}}"], "path": ["superadmin", "create-company"] }
@@ -245,6 +313,35 @@
         {
             "name": "Admin",
             "item": [
+                {
+                    "name": "Login (Admin)",
+                    "event": [
+                        {
+                            "listen": "test",
+                            "script": {
+                                "exec": [
+                                    "var jsonData = pm.response.json();",
+                                    "if (jsonData.token) {",
+                                    "    pm.collectionVariables.set(\"token\", jsonData.token);",
+                                    "    pm.collectionVariables.set(\"admin_token\", jsonData.token);",
+                                    "    console.log(\"Admin Token updated\");",
+                                    "}"
+                                ],
+                                "type": "text/javascript"
+                            }
+                        }
+                    ],
+                    "request": {
+                        "method": "POST",
+                        "header": [],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"email\": \"admin@futureinvo.com\",\n    \"password\": \"password123\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": { "raw": "{{base_url}}/auth/login", "host": ["{{base_url}}"], "path": ["auth", "login"] }
+                    }
+                },
                 {
                     "name": "Get Employees",
                     "request": {
@@ -271,11 +368,236 @@
                     "request": {
                         "method": "POST",
                         "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
-                        "url": { "raw": "{{base_url}}/admin/approve-user/2", "host": ["{{base_url}}"], "path": ["admin", "approve-user", "2"] }
+                        "url": { "raw": "{{base_url}}/admin/approve-user/4", "host": ["{{base_url}}"], "path": ["admin", "approve-user", "4"] }
+                    }
+                },
+                {
+                    "name": "Delete Employee (Master ID)",
+                    "request": {
+                        "method": "DELETE",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "url": { "raw": "{{base_url}}/employee/4", "host": ["{{base_url}}"], "path": ["employee", "4"] }
+                    }
+                },
+                {
+                    "name": "Update Employee",
+                    "request": {
+                        "method": "PUT",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"first_name\": \"Varshitha\",\n  \"salary\": 65000,\n  \"department\": \"IT\",\n  \"designation\": \"Frontend Developer\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": { "raw": "{{base_url}}/admin/employees/4", "host": ["{{base_url}}"], "path": ["admin", "employees", "4"] }
+                    }
+                },
+                {
+                    "name": "Get Employee Documents",
+                    "request": {
+                        "method": "GET",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "url": { "raw": "{{base_url}}/admin/employee/4/documents", "host": ["{{base_url}}"], "path": ["admin", "employee", "4", "documents"] }
+                    }
+                },
+                {
+                    "name": "Verify Document",
+                    "request": {
+                        "method": "PUT",
+                        "header": [ { "key": "Authorization", "value": "Bearer {{admin_token}}", "type": "text" } ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"status\": \"Rejected\"\n}",
+                            "options": { "raw": { "language": "json" } }
+                        },
+                        "url": { "raw": "{{base_url}}/admin/document/1/verify", "host": ["{{base_url}}"], "path": ["admin", "document", "1", "verify"] }
                     }
                 }
             ]
         },
+		{
+			"name": "HR",
+			"item": [
+				{
+					"name": "Login (HR)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.token) {",
+									"    pm.collectionVariables.set(\"token\", jsonData.token);",
+									"    pm.collectionVariables.set(\"hr_token\", jsonData.token);",
+									"    console.log(\"HR Token updated\");",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"hr@futureinvo.com\",\n    \"password\": \"password123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
+						}
+					}
+				},
+				{
+					"name": "Register Employee",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{hr_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"New Employee\",\n    \"email\": \"new.emp@futureinvo.com\",\n    \"password\": \"password123\",\n    \"role\": \"EMPLOYEE\",\n    \"department\": \"Operations\",\n    \"designation\": \"Associate\",\n    \"phone\": \"1122334455\",\n    \"date_of_joining\": \"2026-03-01\",\n    \"company_subdomain\": \"futureinvo\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/register",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Employees",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{hr_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/hr/employees",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"hr",
+								"employees"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Employee",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{hr_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/hr/employee/1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"hr",
+								"employee",
+								"1"
+							]
+						}
+					}
+				},
+				{
+					"name": "Update Employee",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{hr_token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"first_name\": \"Updated Name\",\n    \"salary\": 60000\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/hr/employee/1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"hr",
+								"employee",
+								"1"
+							]
+						}
+					}
+				},
+				{
+					"name": "Delete Employee",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{hr_token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/hr/employee/1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"hr",
+								"employee",
+								"1"
+							]
+						}
+					}
+				}
+			]
+		},
 		{
 			"name": "Employee",
 			"item": [

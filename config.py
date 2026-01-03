@@ -6,6 +6,8 @@ load_dotenv()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 TENANT_FOLDER = os.path.join(BASE_DIR, "tenants")
 os.makedirs(TENANT_FOLDER, exist_ok=True)
+EMPLOYEE_DB_FOLDER = os.path.join(BASE_DIR, "employee_dbs")
+os.makedirs(EMPLOYEE_DB_FOLDER, exist_ok=True)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "hrms-secret-key")
 BASE_DOMAIN = os.getenv("BASE_DOMAIN", "hrms.com")

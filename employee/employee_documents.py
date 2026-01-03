@@ -1,110 +1,162 @@
-import os
-
-from flask import Blueprint, request, jsonify, current_app, g
+from flask import Blueprint, request, jsonify, g, send_from_directory
 from werkzeug.utils import secure_filename
-from models.master import db, Company
-from models.employee_documents import EmployeeDocument
+import os
+import sqlite3
+from datetime import datetime
+from models.master import Company, UserMaster
 from utils.auth_utils import login_required, get_tenant_db_connection
+from config import TENANT_FOLDER, EMPLOYEE_DB_FOLDER
+from models.master_employee import Employee
 
-employee_documents_bp = Blueprint('employee_documents', __name__)
+employee_documents_bp = Blueprint("employee_documents", __name__)
 
-# Configuration
-UPLOAD_FOLDER = 'uploads/employee_docs'
-ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'doc', 'docx'}
+ALLOWED_DOC_TYPES = [
+    "Aadhaar", "PAN", "Resume", "Offer Letter", "Experience Certificate", 
+    "Payslips", "Bank Account Proof", "SSC", "Intermediate", 
+    "Bachelor Degree", "Other Certificates"
+]
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+def ensure_document_schema(conn):
+    """Ensure the documents table exists in Employee DB"""
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            document_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_type TEXT NOT NULL,
+            file_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            uploaded_by TEXT,
+            uploaded_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            verified_status TEXT DEFAULT 'Pending',
+            verified_by TEXT,
+            verified_date DATETIME,
+            rejection_reason TEXT
+        )
+    """)
+    conn.commit()
 
-# -------------------------------
-# Upload Document
-# -------------------------------
-@employee_documents_bp.route('/upload', methods=['POST'])
+@employee_documents_bp.route("/upload", methods=["POST"])
 @login_required
 def upload_document():
+    """Employee uploads a document"""
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
-    
+        return jsonify({"error": "No file part"}), 400
+        
     file = request.files['file']
+    doc_type = request.form.get('document_type')
     
     if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
+        return jsonify({"error": "No selected file"}), 400
         
-    # Determine onboard_id (Employee ID)
-    onboard_id = None
-    
-    # Fetch current employee ID from tenant DB
+    if doc_type not in ALLOWED_DOC_TYPES:
+        return jsonify({"error": f"Invalid document type. Allowed: {ALLOWED_DOC_TYPES}"}), 400
+        
     company = Company.query.get(g.company_id)
-    if not company:
-        return jsonify({'error': 'Company not found'}), 404
-        
-    conn = get_tenant_db_connection(company.db_name)
-    if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
+    
+    # Get Employee DB
+    master_emp = Employee.query.filter_by(email=g.email).first()
+    if not master_emp:
+        return jsonify({"error": "Employee record not found"}), 404
+    
+    db_path = os.path.join(EMPLOYEE_DB_FOLDER, f"emp_{master_emp.id}.db")
     
     try:
+        conn = sqlite3.connect(db_path)
+        ensure_document_schema(conn)
         cur = conn.cursor()
-        cur.execute("SELECT id FROM hrms_employee WHERE user_id = ?", (g.user_id,))
-        row = cur.fetchone()
-        current_emp_id = row[0] if row else None
-    finally:
-        conn.close()
-
-    if not current_emp_id:
-        return jsonify({'error': 'Employee profile not found'}), 404
-    onboard_id = current_emp_id
-
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
         
-        # Ensure upload directory exists
-        abs_upload_path = os.path.join(current_app.root_path, UPLOAD_FOLDER)
-        os.makedirs(abs_upload_path, exist_ok=True)
+        # Save File
+        filename = secure_filename(f"{doc_type}_{int(datetime.now().timestamp())}_{file.filename}")
+        upload_dir = os.path.join(EMPLOYEE_DB_FOLDER, "uploads", str(master_emp.id))
+        os.makedirs(upload_dir, exist_ok=True)
         
-        file_path = os.path.join(abs_upload_path, filename)
+        file_path = os.path.join(upload_dir, filename)
         file.save(file_path)
         
-        document_type = request.form.get('document_type', 'General')
+        # Insert DB Record
+        cur.execute("""
+            INSERT INTO documents 
+            (document_type, file_name, file_path, uploaded_by, verified_status)
+            VALUES (?, ?, ?, ?, 'Pending')
+        """, (doc_type, filename, filename, g.role))
+        doc_id = cur.lastrowid
         
-        new_doc = EmployeeDocument(
-            onboard_id=onboard_id,
-            document_type=document_type,
-            file_name=filename,
-            file_path=file_path,
-            verified_status='Pending'
-        )
-        
-        db.session.add(new_doc)
-        db.session.commit()
-        
-        return jsonify({'message': 'File uploaded successfully', 'document': new_doc.to_dict()}), 201
-    
-    return jsonify({'error': 'File type not allowed'}), 400
-
-# -------------------------------
-# List Documents by Onboard ID
-# -------------------------------
-@employee_documents_bp.route('/list/<int:onboard_id>', methods=['GET'])
-@login_required
-def get_documents(onboard_id):
-    # Fetch current employee ID to verify ownership
-    company = Company.query.get(g.company_id)
-    if not company:
-        return jsonify({'error': 'Company not found'}), 404
-        
-    conn = get_tenant_db_connection(company.db_name)
-    if not conn:
-        return jsonify({'error': 'Database connection failed'}), 500
-        
-    try:
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM hrms_employee WHERE user_id = ?", (g.user_id,))
-        row = cur.fetchone()
-        current_emp_id = row[0] if row else None
-    finally:
+        conn.commit()
         conn.close()
+        
+        return jsonify({"message": "Document uploaded successfully", "status": "Pending", "document_id": doc_id}), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    if not current_emp_id or current_emp_id != onboard_id:
-        return jsonify({'error': 'Unauthorized to view these documents'}), 403
+@employee_documents_bp.route("/my-documents", methods=["GET"])
+@login_required
+def get_my_documents():
+    """List logged-in employee's documents"""
+    master_emp = Employee.query.filter_by(email=g.email).first()
+    if not master_emp:
+        return jsonify({"error": "Employee record not found"}), 404
+        
+    db_path = os.path.join(EMPLOYEE_DB_FOLDER, f"emp_{master_emp.id}.db")
+    
+    if not os.path.exists(db_path):
+         return jsonify([]), 200
 
-    docs = EmployeeDocument.query.filter_by(onboard_id=onboard_id).all()
-    return jsonify([doc.to_dict() for doc in docs]), 200
+    try:
+        conn = sqlite3.connect(db_path)
+        ensure_document_schema(conn)
+        cur = conn.cursor()
+        
+        cur.execute("SELECT * FROM documents")
+        
+        columns = [column[0] for column in cur.description]
+        docs = [dict(zip(columns, row)) for row in cur.fetchall()]
+        conn.close()
+        
+        return jsonify(docs), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@employee_documents_bp.route("/<int:doc_id>", methods=["DELETE"])
+@login_required
+def delete_document(doc_id):
+    """Delete a document (Only if Pending)"""
+    master_emp = Employee.query.filter_by(email=g.email).first()
+    if not master_emp:
+        return jsonify({"error": "Employee record not found"}), 404
+        
+    db_path = os.path.join(EMPLOYEE_DB_FOLDER, f"emp_{master_emp.id}.db")
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        
+        # Check document status
+        cur.execute("SELECT verified_status, file_path FROM documents WHERE document_id = ?", (doc_id,))
+        doc = cur.fetchone()
+        
+        if not doc:
+            conn.close()
+            return jsonify({"error": "Document not found"}), 404
+            
+        if doc[0] != 'Pending':
+            conn.close()
+            return jsonify({"error": "Cannot delete verified or rejected documents"}), 400
+            
+        # Delete file
+        upload_dir = os.path.join(EMPLOYEE_DB_FOLDER, "uploads", str(master_emp.id))
+        file_path = os.path.join(upload_dir, doc[1])
+        
+        if os.path.exists(file_path):
+            try: os.remove(file_path)
+            except: pass
+            
+        # Delete record
+        cur.execute("DELETE FROM documents WHERE document_id = ?", (doc_id,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({"message": "Document deleted successfully"}), 200
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

@@ -4,11 +4,14 @@ import jwt
 import random
 from models.master import db, UserMaster, Company
 from models.rbac import Role
-from utils.auth_utils import hash_password, verify_password
+from utils.auth_utils import hash_password, verify_password, generate_token, get_tenant_db_connection
+from models.master_employee import Employee
 from utils.tenant_db import execute_tenant_query
 from datetime import datetime
-from utils.auth_utils import generate_token
 from utils.decorators import jwt_required
+import os
+import sqlite3
+from config import EMPLOYEE_DB_FOLDER
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -24,6 +27,9 @@ def login():
 
     if not verify_password(user.password, data["password"]):
         return jsonify({"error": "Invalid credentials"}), 401
+
+    if not user.is_active:
+        return jsonify({"error": "Account is pending approval or deactivated"}), 403
 
     token = generate_token(user.id, user.email, user.role, user.company_id)
 
@@ -176,6 +182,48 @@ def register():
     db.session.add(new_user)
     db.session.commit()
 
+    # Add to Master Employee Table (if role is EMPLOYEE)
+    if role_enum == Role.EMPLOYEE:
+        parts = data['name'].strip().split(' ', 1)
+        fname = parts[0]
+        lname = parts[1] if len(parts) > 1 else ""
+        new_employee_master = Employee(
+            name=data['name'],
+            first_name=fname,
+            last_name=lname,
+            email=data['email'],
+            password=hashed_pw,
+            role=role_enum.value,
+            company_subdomain=company.subdomain if company else None,
+            department=data.get('department'),
+            designation=data.get('designation'),
+            phone_number=data.get('phone'),
+            date_of_joining=data.get('date_of_joining')
+        )
+        db.session.add(new_employee_master)
+        db.session.commit()
+
+        # Create Employee DB
+        emp_db_path = os.path.join(EMPLOYEE_DB_FOLDER, f"emp_{new_employee_master.id}.db")
+        conn = sqlite3.connect(emp_db_path)
+        cur = conn.cursor()
+        
+        # Initialize Schema (Simplified for brevity, matches admin/routes.py)
+        cur.execute("CREATE TABLE IF NOT EXISTS personal_info (id INTEGER PRIMARY KEY, first_name TEXT, last_name TEXT, email TEXT, phone TEXT, gender TEXT, dob DATE, status TEXT DEFAULT 'PENDING')")
+        cur.execute("CREATE TABLE IF NOT EXISTS job_details (id INTEGER PRIMARY KEY, job_title TEXT, department TEXT, designation TEXT, salary REAL, join_date DATE)")
+        cur.execute("CREATE TABLE IF NOT EXISTS bank_details (id INTEGER PRIMARY KEY, bank_name TEXT, account_number TEXT, ifsc_code TEXT, branch_name TEXT)")
+        cur.execute("CREATE TABLE IF NOT EXISTS address_details (id INTEGER PRIMARY KEY, address_line1 TEXT, city TEXT, state TEXT, zip TEXT, country TEXT, address_type TEXT)")
+        
+        # Insert Data
+        cur.execute("INSERT INTO personal_info (first_name, last_name, email, phone, status) VALUES (?, ?, ?, ?, ?)",
+                   (fname, lname, data['email'], data.get('phone'), status))
+        
+        cur.execute("INSERT INTO job_details (department, designation, join_date) VALUES (?, ?, ?)",
+                   (data.get('department'), data.get('designation'), data.get('date_of_joining')))
+                   
+        conn.commit()
+        conn.close()
+
     # Add user in tenant DB (if company exists)
     if company:
         from utils.create_db import create_tenant_user
@@ -262,3 +310,76 @@ def update_password():
     db.session.commit()
     
     return jsonify({"message": "Password updated successfully"})
+
+# -------------------------
+# MASTER EMPLOYEE MANAGEMENT
+# -------------------------
+
+@auth_bp.route("/master-employees", methods=["GET"])
+@jwt_required(roles=[Role.SUPER_ADMIN.value, Role.ADMIN.value])
+def get_master_employees():
+    """View all employees in the Master DB Employee table"""
+    employees = Employee.query.all()
+    result = [{
+        "id": e.id,
+        "name": e.name,
+        "email": e.email,
+        "role": e.role,
+        "company": e.company_subdomain,
+        "department": e.department,
+        "designation": e.designation
+    } for e in employees]
+    return jsonify(result), 200
+
+@auth_bp.route("/sync-employees", methods=["POST"])
+@jwt_required(roles=[Role.SUPER_ADMIN.value, Role.ADMIN.value])
+def sync_employees():
+    """Sync existing tenant users into the Master Employee table"""
+    companies = Company.query.all()
+    synced_count = 0
+    
+    for company in companies:
+        try:
+            conn = get_tenant_db_connection(company.db_name)
+            if not conn: continue
+            
+            cur = conn.cursor()
+            # Fetch employee details from Tenant DB
+            query = """
+                SELECT e.first_name, e.last_name, e.email, e.phone_number, 
+                       j.department, j.designation, j.join_date
+                FROM hrms_employee e
+                LEFT JOIN hrms_job_details j ON e.id = j.employee_id
+            """
+            cur.execute(query)
+            rows = cur.fetchall()
+            conn.close()
+            
+            for row in rows:
+                email = row[2]
+                # Check if already exists in Master Employee table
+                if not Employee.query.filter_by(email=email).first():
+                    # Get password/role from UserMaster
+                    master_user = UserMaster.query.filter_by(email=email).first()
+                    if master_user:
+                        new_emp = Employee(
+                            name=f"{row[0]} {row[1]}".strip(),
+                            first_name=row[0],
+                            last_name=row[1],
+                            email=email,
+                            password=master_user.password,
+                            role=master_user.role,
+                            company_subdomain=company.subdomain,
+                            phone_number=row[3],
+                            department=row[4],
+                            designation=row[5],
+                            date_of_joining=row[6]
+                        )
+                        db.session.add(new_emp)
+                        synced_count += 1
+        except Exception as e:
+            print(f"Error syncing company {company.subdomain}: {e}")
+            continue
+            
+    db.session.commit()
+    return jsonify({"message": f"Sync complete. {synced_count} employees added to Master DB."}), 200
