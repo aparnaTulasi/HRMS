@@ -15,7 +15,8 @@ from superadmin.routes import superadmin_bp
 from employee.employee_routes import employee_bp
 from admin.routes import admin_bp
 from hr.routes import hr_bp
-from employee.employee_documents import employee_documents_bp
+from employee.documents import employee_documents_bp
+from access_control.url_routes import url_bp
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -49,6 +50,7 @@ app.register_blueprint(employee_bp, url_prefix="/api/employee")
 app.register_blueprint(admin_bp, url_prefix="/api/admin")
 app.register_blueprint(hr_bp, url_prefix="/api/hr")
 app.register_blueprint(employee_documents_bp, url_prefix="/api/employee-documents")
+app.register_blueprint(url_bp, url_prefix="/api")
 
 # Home Route (ENDPOINTS LIST INCLUDED ✅)
 @app.route("/")
@@ -70,6 +72,11 @@ def home():
                 "get_companies": "GET /api/superadmin/companies",
                 "get_company": "GET /api/superadmin/company/<id>"
             },
+            "system_urls": {
+                "add_url": "POST /api/superadmin/urls",
+                "grant_permission": "POST /api/superadmin/urls/permission",
+                "get_my_urls": "GET /api/urls/my"
+            },
             "admin": {
                 "create_employee": "POST /api/admin/employee",
                 "update_employee": "PUT /api/admin/employee/<id>",
@@ -77,6 +84,7 @@ def home():
                 "get_employee": "GET /api/admin/employee/<id>",
                 "get_employees": "GET /api/admin/employees",
                 "approve_user": "POST /api/admin/approve-user/<id>",
+                "approve_employee": "PUT /api/admin/employees/<id>/approve",
                 "dashboard_stats": "GET /api/admin/dashboard-stats",
                 "verify_document": "PUT /api/admin/document/<id>/verify"
             },

@@ -33,9 +33,22 @@ def login():
 
     token = generate_token(user.id, user.email, user.role, user.company_id)
 
+    # -------------------------
+    # URL GENERATION LOGIC
+    # -------------------------
+    username = user.email.split('@')[0]
+    subdomain = "portal" # Default fallback if no company
+    if user.company_id:
+        company = Company.query.get(user.company_id)
+        if company:
+            subdomain = company.subdomain
+            
+    redirect_url = f"https://{username}.{subdomain}.com"
+
     return jsonify({
         "token": token,
-        "role": user.role
+        "role": user.role,
+        "redirect_url": redirect_url
     })
 
 @auth_bp.route("/me", methods=["GET"])
@@ -151,21 +164,41 @@ def register():
             if creator_company_id != company.id:
                 return jsonify({"error": "Unauthorized to create users for a different company"}), 403
 
+        # ---------------------------------------------------------
+        # EMAIL POLICY ENFORCEMENT
+        # ---------------------------------------------------------
+        if company.email_domain:
+            email = data['email'].lower()
+            domain = company.email_domain.lower()
+            
+            if company.email_policy == "STRICT":
+                if not email.endswith(f"@{domain}"):
+                    return jsonify({"error": f"Email must end with @{domain} (Strict Policy)"}), 400
+            
+            elif company.email_policy == "FLEXIBLE":
+                allowed_gmail = f".{company.subdomain.lower()}@gmail.com"
+                if not (email.endswith(f"@{domain}") or email.endswith(allowed_gmail)):
+                    return jsonify({"error": f"Email must end with @{domain} or {allowed_gmail}"}), 400
+
     # ---------------------------------------------------------
     # STATUS DETERMINATION
     # ---------------------------------------------------------
     status = "PENDING"
     is_active = False
     
-    # If created by an authorized user, set to ACTIVE
-    if creator_role:
+    # Rule: Super Admin, Admin, HR are auto-approved (No approval needed)
+    if role_enum in [Role.SUPER_ADMIN, Role.ADMIN, Role.HR_MANAGER]:
         status = "ACTIVE"
         is_active = True
-        
-    # Exception: First Super Admin is always ACTIVE
-    if role_enum == Role.SUPER_ADMIN and not creator_role:
-        status = "ACTIVE"
-        is_active = True
+    
+    # Rule: Employee needs approval, UNLESS created by an authorized user (Admin/HR)
+    elif role_enum == Role.EMPLOYEE:
+        if creator_role:
+            status = "ACTIVE"
+            is_active = True
+        else:
+            status = "PENDING"
+            is_active = False
 
     # Hash password
     hashed_pw = hash_password(data['password'])

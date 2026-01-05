@@ -27,7 +27,9 @@ def create_company():
         subdomain=data['subdomain'],
         db_name=data['subdomain'],
         admin_email=data['admin_email'],
-        admin_password=hash_password(data['admin_password'])
+        admin_password=hash_password(data['admin_password']),
+        email_domain=data.get('email_domain'),
+        email_policy=data.get('email_policy', 'STRICT')
     )
     
     db.session.add(new_company)

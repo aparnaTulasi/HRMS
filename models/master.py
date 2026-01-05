@@ -12,6 +12,8 @@ class Company(db.Model):
     db_name = db.Column(db.String(100), unique=True, nullable=False)
     admin_email = db.Column(db.String(100), nullable=False, unique=True)
     admin_password = db.Column(db.String(255), nullable=False)
+    email_domain = db.Column(db.String(100), nullable=True) # e.g., futureinvo.com
+    email_policy = db.Column(db.String(20), default="STRICT") # STRICT or FLEXIBLE
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     is_active = db.Column(db.Boolean, default=True)
 

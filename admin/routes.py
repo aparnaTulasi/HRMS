@@ -153,6 +153,8 @@ def get_employees():
     if not company:
         return jsonify({"error": "Company not found"}), 404
     
+    status_filter = request.args.get('status')
+
     try:
         conn = get_tenant_db_connection(company.db_name)
         if not conn:
@@ -174,15 +176,23 @@ def get_employees():
             """, (g.email,))
         else:
             # ADMIN / HR: Show all
-            cur.execute("""
+            query = """
                 SELECT 
                     e.id, e.first_name, e.last_name, u.email, u.role, 
                     j.department, j.designation, e.phone_number, j.join_date, e.status
                 FROM hrms_users u
                 JOIN hrms_employee e ON u.id = e.user_id
                 LEFT JOIN hrms_job_details j ON e.id = j.employee_id
-                ORDER BY e.first_name
-            """)
+            """
+            params = []
+            
+            if status_filter:
+                query += " WHERE e.status = ?"
+                params.append(status_filter)
+                
+            query += " ORDER BY e.first_name"
+            
+            cur.execute(query, params)
         
         employees = cur.fetchall()
         
@@ -608,11 +618,8 @@ def get_pending_approvals():
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {str(e)}"}), 500
 
-@admin_bp.route("/approve-user/<int:user_id>", methods=["POST"])
-@login_required
-@permission_required(Permission.APPROVE_USER)
-def approve_user(user_id):
-    """Approve a pending user registration"""
+def approve_user_logic(user_id):
+    """Service function to approve a user"""
     # 1. Look up in Master DB first (Source of Truth for ID)
     master_user = UserMaster.query.get(user_id)
     if not master_user:
@@ -659,6 +666,36 @@ def approve_user(user_id):
         
     except sqlite3.Error as e:
         return jsonify({"error": f"Database error: {str(e)}"}), 500
+
+@admin_bp.route("/employees/<int:employee_id>/approve", methods=["PUT"])
+@login_required
+@permission_required(Permission.APPROVE_USER)
+def approve_employee(employee_id):
+    """Approve a pending employee (requested flow)"""
+    company = Company.query.get(g.company_id)
+    try:
+        conn = get_tenant_db_connection(company.db_name)
+        cur = conn.cursor()
+        
+        # Get user_id from employee_id
+        cur.execute("SELECT user_id FROM hrms_employee WHERE id = ?", (employee_id,))
+        row = cur.fetchone()
+        conn.close()
+        
+        if not row:
+            return jsonify({"error": "Employee not found"}), 404
+            
+        return approve_user_logic(row[0])
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@admin_bp.route("/approve-user/<int:user_id>", methods=["POST"])
+@login_required
+@permission_required(Permission.APPROVE_USER)
+def approve_user(user_id):
+    """Approve a pending user registration"""
+    return approve_user_logic(user_id)
 
 @admin_bp.route("/companies", methods=["GET"])
 @login_required

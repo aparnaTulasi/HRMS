@@ -4,13 +4,12 @@ import os
 from models.master import db, UserMaster, Company
 from models.rbac import Role
 from utils.decorators import jwt_required
-from config import TENANT_FOLDER
 
 hr_bp = Blueprint("hr", __name__)
 
 def get_tenant_conn(db_name):
     """Helper to connect to tenant database"""
-    db_path = os.path.join(TENANT_FOLDER, f"{db_name}.db")
+    db_path = os.path.join("tenants", f"{db_name}.db")
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     return conn
