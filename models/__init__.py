@@ -1,2 +1,3 @@
-from models.master import db
-from models.employee_documents import EmployeeDocument
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()

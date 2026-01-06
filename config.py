@@ -1,22 +1,13 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-TENANT_FOLDER = os.path.join(BASE_DIR, "tenants")
-os.makedirs(TENANT_FOLDER, exist_ok=True)
-EMPLOYEE_DB_FOLDER = os.path.join(BASE_DIR, "employee_dbs")
-os.makedirs(EMPLOYEE_DB_FOLDER, exist_ok=True)
-
-SECRET_KEY = os.getenv("SECRET_KEY", "hrms-secret-key")
-BASE_DOMAIN = os.getenv("BASE_DOMAIN", "hrms.com")
-
-# Master database (SQLite for now, can switch to PostgreSQL)
-MASTER_DB = f"sqlite:///{os.path.join(BASE_DIR, 'master.db')}"
+INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
+os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 class Config:
-    SQLALCHEMY_DATABASE_URI = MASTER_DB
+    SECRET_KEY = "hrms-secret-key"
+    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(INSTANCE_DIR, 'hrms.db')}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    SQLALCHEMY_BINDS = {}
-    SECRET_KEY = SECRET_KEY
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+
+os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)

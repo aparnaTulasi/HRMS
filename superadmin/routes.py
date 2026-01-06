@@ -1,74 +1,61 @@
 from flask import Blueprint, request, jsonify
-from models.master import db, Company, UserMaster
-from models.rbac import Role
-from utils.decorators import jwt_required
-from utils.create_db import create_company_db, seed_admin_user
-from utils.auth_utils import hash_password
+from werkzeug.security import generate_password_hash
+from models import db
+from models.company import Company
+from sqlalchemy.exc import IntegrityError
+from models.user import User
+from models.employee import Employee
+from utils.decorators import token_required, role_required
 
-superadmin_bp = Blueprint("superadmin", __name__)
+superadmin_bp = Blueprint('superadmin', __name__)
 
-@superadmin_bp.route("/create-company", methods=["POST"])
-@jwt_required(roles=[Role.SUPER_ADMIN.value])
+@superadmin_bp.route('/create-company', methods=['POST'])
+@token_required
+@role_required(['SUPER_ADMIN'])
 def create_company():
     data = request.get_json()
     
-    required = ['company_name', 'subdomain', 'admin_email', 'admin_password']
-    for field in required:
-        if not data.get(field):
-            return jsonify({"error": f"{field} is required"}), 400
-        
-    # Check if subdomain exists
     if Company.query.filter_by(subdomain=data['subdomain']).first():
-        return jsonify({"error": "Subdomain already exists"}), 409
+        return jsonify({'message': 'Subdomain already exists'}), 409
+
+    if User.query.filter_by(email=data['admin_email']).first():
+        return jsonify({'message': 'Admin email already exists'}), 409
         
-    # Create Company in Master DB
+    # 1. Create Company
     new_company = Company(
         company_name=data['company_name'],
-        subdomain=data['subdomain'],
-        db_name=data['subdomain'],
-        admin_email=data['admin_email'],
-        admin_password=hash_password(data['admin_password']),
-        email_domain=data.get('email_domain'),
-        email_policy=data.get('email_policy', 'STRICT')
+        subdomain=data['subdomain']
     )
+    db.session.add(new_company)    
     
-    db.session.add(new_company)
-    db.session.commit()
+    # 2. Create Admin User
+    hashed_password = generate_password_hash(data['admin_password'], method='pbkdf2:sha256')
+    new_admin = User(
+        email=data['admin_email'],
+        password=hashed_password,
+        role='ADMIN',
+        company=new_company,
+        status='ACTIVE',
+        portal_prefix='aparna' # As per user request
+    )
+    db.session.add(new_admin)
     
-    # Create Admin User in Master DB automatically
-    if not UserMaster.query.filter_by(email=data['admin_email']).first():
-        admin_user = UserMaster(
-            email=data['admin_email'],
-            password=hash_password(data['admin_password']),
-            role=Role.ADMIN.value,
-            company_id=new_company.id,
-            is_active=True,
-            status="ACTIVE"
-        )
-        db.session.add(admin_user)
-        db.session.commit()
-    
-    # Initialize the Tenant Database (SQLite file)
-    create_company_db(new_company.db_name)
-    
-    # Seed Admin in Tenant DB
-    seed_admin_user(new_company.db_name, new_company.id, data['admin_email'], hash_password(data['admin_password']))
-    
-    return jsonify({
-        "id": new_company.id,
-        "company_name": new_company.company_name,
-        "subdomain": new_company.subdomain
-    }), 201
+    # 3. Create Employee Profile for Admin
+    admin_emp = Employee(
+        user=new_admin,
+        company=new_company,
+        first_name='Admin',
+        last_name='User'
+    )
+    db.session.add(admin_emp)
 
-@superadmin_bp.route("/companies", methods=["GET"])
-@jwt_required(roles=[Role.SUPER_ADMIN.value])
-def get_companies():
-    companies = Company.query.all()
-    result = []
-    for c in companies:
-        result.append({
-            "id": c.id,
-            "company_name": c.company_name,
-            "subdomain": c.subdomain
-        })
-    return jsonify(result), 200
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'message': 'An integrity error occurred. The company or admin might already exist.'}), 409
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': 'Could not create company.', 'error': str(e)}), 500
+    
+    return jsonify({'message': 'Company and Admin created successfully'}), 201
