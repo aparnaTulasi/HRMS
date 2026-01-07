@@ -1,18 +1,11 @@
-# Python cache
+venv/
 __pycache__/
 *.pyc
-
-# Virtual environment
-venv/
-
-# Environment variables
-.env
-utils/.env
-
-# Database files
-*.db
 instance/
-tenants/
-
-# OS files
+uploads/
+.env
 .DS_Store
+.vscode/
+*.db
+*.log
+__MACOSX/

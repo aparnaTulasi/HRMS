@@ -14,7 +14,7 @@ class Employee(db.Model):
     department = db.Column(db.String(50))
     designation = db.Column(db.String(50))
     date_of_joining = db.Column(db.String(20))
-    Salary = db.Column(db.String(60))
+    salary = db.Column(db.String(60))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
