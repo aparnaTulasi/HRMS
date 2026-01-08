@@ -5,9 +5,10 @@ INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 class Config:
-    SECRET_KEY = "hrms-secret-key"
+    SECRET_KEY = "hrms-secret-key-change-this"
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(INSTANCE_DIR, 'hrms.db')}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
+    BASE_URL = "http://localhost:5000"
 
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)

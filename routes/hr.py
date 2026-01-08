@@ -32,11 +32,8 @@ def approve_employee(user_id):
     user = User.query.get(user_id)
     if not user:
         return jsonify({'message': 'User not found'}), 404
-        
     if user.company_id != g.user.company_id:
-        return jsonify({'message': 'Unauthorized access to this user'}), 403
-        
+        return jsonify({'message': 'Unauthorized access'}), 403
     user.status = 'ACTIVE'
     db.session.commit()
-    
     return jsonify({'message': 'Employee approved successfully', 'status': 'ACTIVE'})
