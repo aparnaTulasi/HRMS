@@ -10,7 +10,6 @@ class Attendance(db.Model):
     out_time = db.Column(db.DateTime)
     status = db.Column(db.String(20), default='ABSENT')
     work_hours = db.Column(db.Float, default=0.0)
-    year = db.Column(db.Integer, default=datetime.utcnow().year)
     month = db.Column(db.Integer, default=datetime.utcnow().month)
     marked_by = db.Column(db.String(20))
     remarks = db.Column(db.Text)

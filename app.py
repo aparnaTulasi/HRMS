@@ -34,19 +34,25 @@ from routes.urls import urls_bp
 from routes.permissions import permissions_bp
 from routes.documents import documents_bp
 from leave.routes import leave_bp
+from routes.user import user_bp
+from routes.otp import otp_bp
+from routes.verify import verify_bp
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
+app.register_blueprint(employee_bp, url_prefix='/api/employee')
 app.register_blueprint(superadmin_bp, url_prefix='/api/superadmin')
 app.register_blueprint(hr_bp, url_prefix='/api/hr')
-app.register_blueprint(employee_bp, url_prefix='/api/employee')
 app.register_blueprint(attendance_bp, url_prefix='/api/attendance')
 app.register_blueprint(employee_advanced_bp, url_prefix='/api/employee')
 app.register_blueprint(urls_bp, url_prefix='/api/urls')
 app.register_blueprint(permissions_bp, url_prefix='/api/permissions')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')
 app.register_blueprint(leave_bp)
+app.register_blueprint(user_bp, url_prefix='/api/user')
+app.register_blueprint(otp_bp, url_prefix='/api/otp')
+app.register_blueprint(verify_bp, url_prefix='/api/verify')
 
 @app.route('/')
 def home():

@@ -5,7 +5,7 @@ class Company(db.Model):
     __tablename__ = 'companies'
     id = db.Column(db.Integer, primary_key=True)
     company_name = db.Column(db.String(100), nullable=False)
-    subdomain = db.Column(db.String(50), unique=True, nullable=False)
+    subdomain = db.Column(db.String(50), unique=False, nullable=False)
     company_code = db.Column(db.String(20), unique=True)
     industry = db.Column(db.String(100))
     address = db.Column(db.Text)
