@@ -270,6 +270,422 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "Policies",
+			"item": [
+				{
+					"name": "Get Policy Categories",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"categories"
+							]
+						}
+					}
+				},
+				{
+					"name": "Create Policy Category",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"HR Policies\",\n  \"description\": \"General HR policies\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/policies/categories",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"categories"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Policies List",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Policy Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/1",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"1"
+							]
+						}
+					}
+				},
+				{
+					"name": "Create Policy",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Leave Policy\",\n  \"description\": \"Policy regarding leaves\",\n  \"category_id\": 1,\n  \"effective_date\": \"2023-01-01\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/policies/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								""
+							]
+						}
+					}
+				},
+				{
+					"name": "Acknowledge Policy",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/1/acknowledge",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"1",
+								"acknowledge"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Acknowledgments",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/acknowledgments",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"acknowledgments"
+							]
+						}
+					}
+				},
+				{
+					"name": "Get Violations",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/violations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"violations"
+							]
+						}
+					}
+				},
+				{
+					"name": "Report Violation",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"policy_id\": 1,\n  \"description\": \"Violation description\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/policies/violations",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"violations"
+							]
+						}
+					}
+				},
+				{
+					"name": "Request Exception",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"policy_id\": 1,\n  \"reason\": \"Medical emergency\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/policies/exceptions",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"exceptions"
+							]
+						}
+					}
+				},
+				{
+					"name": "Approve Exception",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/exceptions/1/approve",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"exceptions",
+								"1",
+								"approve"
+							]
+						}
+					}
+				},
+				{
+					"name": "Policy Dashboard",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/dashboard",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"dashboard"
+							]
+						}
+					}
+				},
+				{
+					"name": "Compliance Report",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/compliance-report",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"compliance-report"
+							]
+						}
+					}
+				},
+				{
+					"name": "Upload Policy Document",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{base_url}}/api/policies/1/upload",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"1",
+								"upload"
+							]
+						}
+					}
+				},
+				{
+					"name": "Download Policy Document",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/policies/documents/filename.pdf",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"policies",
+								"documents",
+								"filename.pdf"
+							]
+						}
+					}
+				}
+			]
 		}
 	],
 	"variable": [

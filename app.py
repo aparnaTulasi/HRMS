@@ -33,6 +33,7 @@ from routes.employee_advanced import employee_advanced_bp
 from routes.urls import urls_bp
 from routes.permissions import permissions_bp
 from routes.documents import documents_bp
+from routes.policies import policies_bp
 from leave.routes import leave_bp
 from routes.user import user_bp
 from routes.otp import otp_bp
@@ -49,6 +50,7 @@ app.register_blueprint(employee_advanced_bp, url_prefix='/api/employee')
 app.register_blueprint(urls_bp, url_prefix='/api/urls')
 app.register_blueprint(permissions_bp, url_prefix='/api/permissions')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')
+app.register_blueprint(policies_bp, url_prefix='/api/policies')
 app.register_blueprint(leave_bp)
 app.register_blueprint(user_bp, url_prefix='/api/user')
 app.register_blueprint(otp_bp, url_prefix='/api/otp')
