@@ -16,7 +16,7 @@
 						"header": [],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"email\": \"superadmin@hrms.com\",\n  \"password\": \"password123\",\n  \"role\": \"SUPER_ADMIN\",\n  \"first_name\": \"Aparna\",\n  \"last_name\": \"Tulasi\"\n}",
+							"raw": "{\n  \"email\": \"superadmin@hrms.com\",\n  \"password\": \"password123\",\n  \"confirm_password\": \"password123\",\n  \"role\": \"SUPER_ADMIN\",\n  \"first_name\": \"Aparna\",\n  \"last_name\": \"Tulasi\"\n}",
 							"options": {
 								"raw": {
 									"language": "json"
@@ -33,6 +33,33 @@
 								"auth",
 								"super-admin",
 								"signup"
+							]
+						}
+					}
+				},
+				{
+					"name": "2. Register Company (Akhil Kumar)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"company_name\": \"Future Invo\",\n  \"subdomain\": \"futureinvo.com\",\n  \"company_code\": \"F001\",\n  \"email\": \"admin@futureinvo.com\",\n  \"password\": \"Admin@123\",\n  \"confirm_password\": \"Admin@123\",\n  \"first_name\": \"Akhil\",\n  \"last_name\": \"Kumar\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/register-company",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"register-company"
 							]
 						}
 					}
@@ -81,7 +108,7 @@
 					}
 				},
 				{
-					"name": "Request OTP",
+					"name": "Forgot Password",
 					"request": {
 						"method": "POST",
 						"header": [],
@@ -95,14 +122,14 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/otp/request",
+							"raw": "{{base_url}}/api/auth/forgot-password",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
 								"api",
-								"otp",
-								"request"
+								"auth",
+								"forgot-password"
 							]
 						}
 					}
@@ -122,14 +149,41 @@
 							}
 						},
 						"url": {
-							"raw": "{{base_url}}/api/verify/otp",
+							"raw": "{{base_url}}/api/auth/verify-otp",
 							"host": [
 								"{{base_url}}"
 							],
 							"path": [
 								"api",
-								"verify",
-								"otp"
+								"auth",
+								"verify-otp"
+							]
+						}
+					}
+				},
+				{
+					"name": "Reset Password",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"superadmin@hrms.com\",\n  \"otp\": \"123456\",\n  \"password\": \"newpassword123\",\n  \"confirm_password\": \"newpassword123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/reset-password",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"auth",
+								"reset-password"
 							]
 						}
 					}
@@ -164,23 +218,23 @@
                         "header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"employee@futureinvo.com\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"department\": \"Engineering\",\n  \"designation\": \"Software Engineer\",\n  \"date_of_joining\": \"2023-10-01\",\n  \"role\": \"EMPLOYEE\"\n}",
+                            "raw": "{\n  \"email\": \"emp1@futureinvo.com\",\n  \"first_name\": \"Naveen\",\n  \"last_name\": \"Kumar\",\n  \"department\": \"IT\",\n  \"designation\": \"Software Engineer\",\n  \"date_of_joining\": \"2026-01-10\",\n  \"password\": \"Welcome@123\"\n}",
                             "options": { "raw": { "language": "json" } }
                         },
-                        "url": { "raw": "{{base_url}}/api/admin/employees", "host": ["{{base_url}}"], "path": ["api", "admin", "employees"] }
+                        "url": { "raw": "{{base_url}}/api/admin/create-employee", "host": ["{{base_url}}"], "path": ["api", "admin", "create-employee"] }
                     }
                 },
                 {
-                    "name": "Create HR/Manager",
+                    "name": "Create HR (Anjali Sharma)",
                     "request": {
                         "method": "POST",
                         "header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"hr@futureinvo.com\",\n  \"first_name\": \"Jane\",\n  \"last_name\": \"Smith\",\n  \"department\": \"HR\",\n  \"designation\": \"HR Manager\",\n  \"date_of_joining\": \"2023-01-01\",\n  \"role\": \"HR\"\n}",
+                            "raw": "{\n  \"email\": \"hr@futureinvo.com\",\n  \"password\": \"Hr@123\",\n  \"first_name\": \"Anjali\",\n  \"last_name\": \"Sharma\"\n}",
                             "options": { "raw": { "language": "json" } }
                         },
-                        "url": { "raw": "{{base_url}}/api/admin/employees", "host": ["{{base_url}}"], "path": ["api", "admin", "employees"] }
+                        "url": { "raw": "{{base_url}}/api/admin/create-hr", "host": ["{{base_url}}"], "path": ["api", "admin", "create-hr"] }
                     }
                 },
                 {
@@ -272,417 +326,31 @@
 			]
 		},
 		{
-			"name": "Policies",
+			"name": "RBAC Tests",
 			"item": [
 				{
-					"name": "Get Policy Categories",
+					"name": "Admin Access (Should Pass)",
 					"request": {
 						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/categories",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"categories"
-							]
-						}
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"url": { "raw": "{{base_url}}/api/admin/employees", "host": ["{{base_url}}"], "path": ["api", "admin", "employees"] }
 					}
 				},
 				{
-					"name": "Create Policy Category",
+					"name": "HR Access to Admin (Should Fail)",
 					"request": {
 						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"name\": \"HR Policies\",\n  \"description\": \"General HR policies\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/policies/categories",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"categories"
-							]
-						}
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"body": { "mode": "raw", "raw": "{}" },
+						"url": { "raw": "{{base_url}}/api/admin/create-hr", "host": ["{{base_url}}"], "path": ["api", "admin", "create-hr"] }
 					}
 				},
 				{
-					"name": "Get Policies List",
+					"name": "Employee Access to Admin (Should Fail)",
 					"request": {
 						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								""
-							]
-						}
-					}
-				},
-				{
-					"name": "Get Policy Details",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/1",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"1"
-							]
-						}
-					}
-				},
-				{
-					"name": "Create Policy",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"title\": \"Leave Policy\",\n  \"description\": \"Policy regarding leaves\",\n  \"category_id\": 1,\n  \"effective_date\": \"2023-01-01\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/policies/",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								""
-							]
-						}
-					}
-				},
-				{
-					"name": "Acknowledge Policy",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/1/acknowledge",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"1",
-								"acknowledge"
-							]
-						}
-					}
-				},
-				{
-					"name": "Get Acknowledgments",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/acknowledgments",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"acknowledgments"
-							]
-						}
-					}
-				},
-				{
-					"name": "Get Violations",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/violations",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"violations"
-							]
-						}
-					}
-				},
-				{
-					"name": "Report Violation",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"policy_id\": 1,\n  \"description\": \"Violation description\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/policies/violations",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"violations"
-							]
-						}
-					}
-				},
-				{
-					"name": "Request Exception",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n  \"policy_id\": 1,\n  \"reason\": \"Medical emergency\"\n}",
-							"options": {
-								"raw": {
-									"language": "json"
-								}
-							}
-						},
-						"url": {
-							"raw": "{{base_url}}/api/policies/exceptions",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"exceptions"
-							]
-						}
-					}
-				},
-				{
-					"name": "Approve Exception",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/exceptions/1/approve",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"exceptions",
-								"1",
-								"approve"
-							]
-						}
-					}
-				},
-				{
-					"name": "Policy Dashboard",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/dashboard",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"dashboard"
-							]
-						}
-					}
-				},
-				{
-					"name": "Compliance Report",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/compliance-report",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"compliance-report"
-							]
-						}
-					}
-				},
-				{
-					"name": "Upload Policy Document",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"body": {
-							"mode": "formdata",
-							"formdata": [
-								{
-									"key": "file",
-									"type": "file",
-									"src": []
-								}
-							]
-						},
-						"url": {
-							"raw": "{{base_url}}/api/policies/1/upload",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"1",
-								"upload"
-							]
-						}
-					}
-				},
-				{
-					"name": "Download Policy Document",
-					"request": {
-						"method": "GET",
-						"header": [
-							{
-								"key": "Authorization",
-								"value": "Bearer {{token}}",
-								"type": "text"
-							}
-						],
-						"url": {
-							"raw": "{{base_url}}/api/policies/documents/filename.pdf",
-							"host": [
-								"{{base_url}}"
-							],
-							"path": [
-								"api",
-								"policies",
-								"documents",
-								"filename.pdf"
-							]
-						}
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"url": { "raw": "{{base_url}}/api/admin/employees", "host": ["{{base_url}}"], "path": ["api", "admin", "employees"] }
 					}
 				}
 			]

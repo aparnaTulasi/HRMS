@@ -19,6 +19,8 @@ class User(UserMixin, db.Model):
     portal_prefix = db.Column(db.String(50), nullable=True)
     otp = db.Column(db.String(6), nullable=True)
     otp_expiry = db.Column(db.DateTime, nullable=True)
+    reset_otp = db.Column(db.String(6), nullable=True)
+    reset_otp_expiry = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     employee_profile = db.relationship('Employee', backref='user', uselist=False, lazy=True)

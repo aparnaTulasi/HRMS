@@ -54,6 +54,8 @@ def fix_user_table():
                 portal_prefix VARCHAR(50),
                 otp VARCHAR(6),
                 otp_expiry DATETIME,
+                reset_otp VARCHAR(6),
+                reset_otp_expiry DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (company_id) REFERENCES companies(id)

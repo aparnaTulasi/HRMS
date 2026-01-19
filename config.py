@@ -15,11 +15,12 @@ class Config:
     BASE_URL = "http://localhost:5000"
     
     # Email Configuration
-    MAIL_SERVER = os.getenv("MAIL_SERVER")
-    MAIL_PORT = int(os.getenv("MAIL_PORT", 587))
-    MAIL_USE_TLS = os.getenv("MAIL_USE_TLS") == "True"
-    MAIL_USERNAME = os.getenv("MAIL_USERNAME")
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+    MAIL_SERVER = "smtp.gmail.com"
+    MAIL_PORT = 587
+    MAIL_USE_TLS = True
+    MAIL_USERNAME = "tulasiseelam9@gmail.com"
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD") # Set this env var to your 16-digit App Password
+    MAIL_DEFAULT_SENDER = "tulasiseelam9@gmail.com"
 
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 

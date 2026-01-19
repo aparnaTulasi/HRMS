@@ -38,6 +38,11 @@ def check_schema():
         else:
             print("\n❌ Neither 'role' nor 'user_role' found!")
             
+        if 'reset_otp' in column_names:
+            print("✅ 'reset_otp' column exists.")
+        else:
+            print("❌ 'reset_otp' column MISSING! Run scripts/add_reset_columns.py")
+            
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:

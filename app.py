@@ -4,12 +4,11 @@ from flask_login import LoginManager
 from config import Config
 from models import db
 
+
 app = Flask(__name__)
 app.config.from_object(Config)
-
 CORS(app)
 db.init_app(app)
-
 login_manager = LoginManager()
 login_manager.init_app(app)
 
@@ -23,7 +22,7 @@ def unauthorized():
     return jsonify({'message': 'Authentication required'}), 401
 
 # Import blueprints
-from routes.auth import auth_bp
+from routes.auth import auth_bp, mail
 from routes.admin import admin_bp
 from routes.employee import employee_bp
 from routes.superadmin import superadmin_bp
@@ -41,6 +40,7 @@ from routes.verify import verify_bp
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
+mail.init_app(app)
 app.register_blueprint(admin_bp, url_prefix='/api/admin')
 app.register_blueprint(employee_bp, url_prefix='/api/employee')
 app.register_blueprint(superadmin_bp, url_prefix='/api/superadmin')
@@ -60,8 +60,11 @@ app.register_blueprint(verify_bp, url_prefix='/api/verify')
 def home():
     return jsonify({'message': 'HRMS API Running', 'version': '2.0'})
 
-if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-    print("✅ HRMS Server Starting...")
-    app.run(debug=True, port=5000)
+# if __name__ == '__main__':
+#     with app.app_context():
+#         db.create_all()
+#     print("✅ HRMS Server Starting...")
+#     app.run(debug=True, port=5000)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)

@@ -48,6 +48,8 @@ def reset_database():
             company_code VARCHAR(20),
             otp VARCHAR(6),
             otp_expiry DATETIME,
+            reset_otp VARCHAR(6),
+            reset_otp_expiry DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (company_id) REFERENCES companies(id)

@@ -14,17 +14,22 @@ from utils.email_utils import send_login_credentials
 superadmin_bp = Blueprint('superadmin', __name__)
 
 def generate_company_code(name):
-    """Generates a code like FI00 from FutureInvo"""
-    prefix = name[:2].upper()
+    clean = ''.join(ch for ch in name if ch.isalnum())
+    prefix = (clean[:2] or "CO").upper()
     suffix = ''.join(secrets.choice(string.digits) for _ in range(2))
     return f"{prefix}{suffix}"
+
 
 @superadmin_bp.route('/create-company', methods=['POST'])
 @token_required
 @role_required(['SUPER_ADMIN'])
 def create_company():
     data = request.get_json()
-    
+
+    required = ["company_name", "subdomain", "admin_email"]
+    if not data or not all(data.get(k) for k in required):
+        return jsonify({"message": "company_name, subdomain, admin_email are required"}), 400
+
     # Check if admin email already exists
     if User.query.filter_by(email=data['admin_email']).first():
         return jsonify({'message': 'Admin email already exists'}), 409
