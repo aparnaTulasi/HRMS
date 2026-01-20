@@ -13,20 +13,21 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
     BASE_URL = "http://localhost:5000"
-    
+
     # Email Configuration
     MAIL_SERVER = "smtp.gmail.com"
     MAIL_PORT = 587
     MAIL_USE_TLS = True
     MAIL_USERNAME = "tulasiseelam9@gmail.com"
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD") # Set this env var to your 16-digit App Password
-    MAIL_DEFAULT_SENDER = "tulasiseelam9@gmail.com"
-
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+    MAIL_DEFAULT_SENDER = "aparnatulasi7@gmail.com"
+    
+    
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 
 # Employee Documents Config
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads", "employee_documents")
-ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
+ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png","docx"}
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS

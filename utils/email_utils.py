@@ -2,17 +2,22 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import current_app
+import traceback
 
 
 def _send_html_email(to_email: str, subject: str, html_body: str) -> bool:
     try:
-        sender_email = current_app.config["MAIL_USERNAME"]
-        sender_password = current_app.config["MAIL_PASSWORD"]
-        smtp_server = current_app.config["MAIL_SERVER"]
-        smtp_port = current_app.config["MAIL_PORT"]
+        sender_email = current_app.config.get("MAIL_USERNAME")
+        sender_password = current_app.config.get("MAIL_PASSWORD")
+        smtp_server = current_app.config.get("MAIL_SERVER")
+        smtp_port = current_app.config.get("MAIL_PORT")
 
-        if not all([sender_email, sender_password, smtp_server, smtp_port]):
-            print("❌ Mail config missing. Check .env + Config.py")
+        if not sender_password:
+            print("❌ Error: MAIL_PASSWORD is not set. Check your .env file.")
+            return False
+
+        if not all([sender_email, smtp_server, smtp_port]):
+            print("❌ Error: Missing email configuration (USERNAME, SERVER, or PORT).")
             return False
 
         msg = MIMEMultipart()
@@ -21,19 +26,28 @@ def _send_html_email(to_email: str, subject: str, html_body: str) -> bool:
         msg["Subject"] = subject
         msg.attach(MIMEText(html_body, "html"))
 
+        print(f"Attempting to connect to {smtp_server}:{smtp_port}...")
         server = smtplib.SMTP(smtp_server, smtp_port)
         server.ehlo()
         server.starttls()
         server.ehlo()
+        
+        print(f"Attempting login as {sender_email}...")
         server.login(sender_email, sender_password)
+        
+        print(f"Sending email to {to_email}...")
         server.sendmail(sender_email, to_email, msg.as_string())
         server.quit()
 
-        print("✅ Email sent to:", to_email)
+        print("✅ Email sent successfully!")
         return True
 
+    except smtplib.SMTPAuthenticationError:
+        print("❌ SMTP Authentication Error: Check your email and App Password.")
+        return False
     except Exception as e:
-        print("❌ Email send failed:", e)
+        print(f"❌ Email send failed: {e}")
+        traceback.print_exc()
         return False
 
 

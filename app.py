@@ -2,12 +2,19 @@ from flask import Flask, jsonify
 from flask_cors import CORS
 from flask_login import LoginManager
 from config import Config
+from extensions import mail
 from models import db
 
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
 
+    mail.init_app(app)   # ✅ must
+    return app
 app = Flask(__name__)
 app.config.from_object(Config)
 CORS(app)
+
 db.init_app(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -22,7 +29,7 @@ def unauthorized():
     return jsonify({'message': 'Authentication required'}), 401
 
 # Import blueprints
-from routes.auth import auth_bp, mail
+from routes.auth import auth_bp
 from routes.admin import admin_bp
 from routes.employee import employee_bp
 from routes.superadmin import superadmin_bp

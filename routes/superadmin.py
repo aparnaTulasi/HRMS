@@ -13,6 +13,16 @@ from utils.email_utils import send_login_credentials
 
 superadmin_bp = Blueprint('superadmin', __name__)
 
+def clean_domain(subdomain: str) -> str:
+    if not subdomain:
+        return ""
+    return subdomain.replace("http://", "").replace("https://", "").strip().strip("/")
+
+def build_login_url(email: str, company_code: str, subdomain: str) -> str:
+    username = email.split("@")[0]
+    sub = clean_domain(subdomain)
+    return f"http://{username}{company_code}.{sub}"
+
 def generate_company_code(name):
     clean = ''.join(ch for ch in name if ch.isalnum())
     prefix = (clean[:2] or "CO").upper()
@@ -59,8 +69,7 @@ def create_company():
         db.session.commit()
         
         # Send Email with Credentials and URL
-        username = data['admin_email'].split('@')[0]
-        login_url = f"http://{username}{company_code}.{data['subdomain']}"
+        login_url = build_login_url(data['admin_email'], company_code, data['subdomain'])
         
         email_sent = send_login_credentials(data['admin_email'], raw_password, login_url)
         
@@ -120,9 +129,8 @@ def create_admin():
     db.session.commit()
     
     # 5. Send Email
-    username = data['email'].split('@')[0]
     code = company.company_code if company.company_code else "00"
-    login_url = f"http://{username}{code}.{company.subdomain}"
+    login_url = build_login_url(data['email'], code, company.subdomain)
     
     send_login_credentials(data['email'], raw_password, login_url)
     
@@ -174,10 +182,8 @@ def create_user():
     db.session.commit()
     
     # Email
-    username = data['email'].split('@')[0]
     code = company.company_code if company.company_code else "00"
-    domain = company.subdomain
-    login_url = f"http://{username}{code}.{domain}"
+    login_url = build_login_url(data['email'], code, company.subdomain)
     
     send_login_credentials(data['email'], raw_password, login_url)
     

@@ -11,11 +11,12 @@ def clear_all_data():
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    print("⚠️  Cleaning up ALL data (Users, Companies, Employees)...")
+    print("⚠️  Cleaning up ALL data (Users, Companies, Employees,super_admins)...")
     
     try:
         # List of tables to clear in order of dependency
         tables_to_clear = [
+            'super_admins',
             'employee_documents',
             'employee_address',
             'employee_bank_details',
