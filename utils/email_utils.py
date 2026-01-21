@@ -2,75 +2,71 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import current_app
-import traceback
 
 
-def _send_html_email(to_email: str, subject: str, html_body: str) -> bool:
+def _send_plain_email(to_email: str, subject: str, body: str) -> bool:
+    """
+    Internal helper: sends email using SMTP config from Flask current_app.config
+    """
+    smtp_server = current_app.config.get("MAIL_SERVER", "smtp.gmail.com")
+    smtp_port = int(current_app.config.get("MAIL_PORT", 587))
+    smtp_user = current_app.config.get("MAIL_USERNAME")
+    smtp_pass = current_app.config.get("MAIL_PASSWORD")
+
+    if not smtp_user or not smtp_pass:
+        print("❌ Mail credentials missing (MAIL_USERNAME / MAIL_PASSWORD).")
+        return False
+
     try:
-        sender_email = current_app.config.get("MAIL_USERNAME")
-        sender_password = current_app.config.get("MAIL_PASSWORD")
-        smtp_server = current_app.config.get("MAIL_SERVER")
-        smtp_port = current_app.config.get("MAIL_PORT")
-
-        if not sender_password:
-            print("❌ Error: MAIL_PASSWORD is not set. Check your .env file.")
-            return False
-
-        if not all([sender_email, smtp_server, smtp_port]):
-            print("❌ Error: Missing email configuration (USERNAME, SERVER, or PORT).")
-            return False
-
         msg = MIMEMultipart()
-        msg["From"] = sender_email
+        msg["From"] = smtp_user
         msg["To"] = to_email
         msg["Subject"] = subject
-        msg.attach(MIMEText(html_body, "html"))
+        msg.attach(MIMEText(body, "plain"))
 
-        print(f"Attempting to connect to {smtp_server}:{smtp_port}...")
-        server = smtplib.SMTP(smtp_server, smtp_port)
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=50)
         server.ehlo()
         server.starttls()
         server.ehlo()
-        
-        print(f"Attempting login as {sender_email}...")
-        server.login(sender_email, sender_password)
-        
-        print(f"Sending email to {to_email}...")
-        server.sendmail(sender_email, to_email, msg.as_string())
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
         server.quit()
 
-        print("✅ Email sent successfully!")
+        print(f"✅ Email sent to {to_email}")
         return True
-
-    except smtplib.SMTPAuthenticationError:
-        print("❌ SMTP Authentication Error: Check your email and App Password.")
-        return False
     except Exception as e:
-        print(f"❌ Email send failed: {e}")
-        traceback.print_exc()
+        print(f"❌ Email error: {e}")
         return False
 
 
-def send_login_credentials(to_email, password, login_url):
-    subject = "Your HRMS Admin Credentials"
-    body = f"""
-    <h3>Welcome to HRMS</h3>
-    <p>Your company account has been created successfully.</p>
-    <p><strong>Login URL:</strong> <a href="{login_url}">{login_url}</a></p>
-    <p><strong>Username:</strong> {to_email}</p>
-    <p><strong>Password:</strong> {password}</p>
-    <br>
-    <p>Please login and change your password immediately.</p>
-    """
-    return _send_html_email(to_email, subject, body)
+# -------------------------
+# OTP Emails (Super Admin)
+# -------------------------
+def send_signup_otp(to_email: str, otp: str) -> bool:
+    subject = "Super Admin Signup OTP"
+    body = f"Your signup OTP is: {otp}\n\nValid for 10 minutes."
+    return _send_plain_email(to_email, subject, body)
 
 
-def send_otp_email(to_email, otp):
-    subject = "Your HRMS Verification OTP"
-    body = f"""
-    <h3>HRMS Verification</h3>
-    <p>Your One Time Password (OTP) is:</p>
-    <h2>{otp}</h2>
-    <p>This OTP is valid for 10 minutes.</p>
-    """
-    return _send_html_email(to_email, subject, body)
+def send_reset_otp(to_email: str, otp: str) -> bool:
+    subject = "Super Admin Password Reset OTP"
+    body = f"Your password reset OTP is: {otp}\n\nValid for 10 minutes."
+    return _send_plain_email(to_email, subject, body)
+
+
+# --------------------------------
+# Login Credentials Email (Admin/HR/Employee)
+# --------------------------------
+def send_login_credentials(email: str, password: str, login_url: str) -> bool:
+    subject = "Your HRMS Login Credentials"
+    body = (
+        "Hello,\n\n"
+        "Your account has been created. Here are your login details:\n\n"
+        f"Login URL: {login_url}\n"
+        f"Email: {email}\n"
+        f"Password: {password}\n\n"
+        "Please change your password after your first login.\n\n"
+        "Regards,\n"
+        "HRMS Team\n"
+    )
+    return _send_plain_email(email, subject, body)

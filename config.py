@@ -16,10 +16,10 @@ class Config:
 
     # Email Configuration
     MAIL_SERVER = "smtp.gmail.com"
-    MAIL_PORT = 587
     MAIL_USE_TLS = True
     MAIL_USERNAME = "tulasiseelam9@gmail.com"
-    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+    MAIL_PASSWORD = "jganbyvmwvriphdz"
+    MAIL_PORT = 587
     MAIL_DEFAULT_SENDER = "aparnatulasi7@gmail.com"
     
     

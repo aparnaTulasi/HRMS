@@ -5,6 +5,7 @@ db = SQLAlchemy()
 
 # Import all models
 from .user import User
+from .super_admin import SuperAdmin
 from .company import Company
 from .employee import Employee
 from .attendance import Attendance
