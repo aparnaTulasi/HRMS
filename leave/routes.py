@@ -7,7 +7,7 @@ from models import db
 @leave_bp.route('/apply', methods=['POST'])
 @login_required
 def apply_leave():
-    data = request.get_json()
+    data = request.get_json(force=True)
     new_leave = Leave(
         employee_id=current_user.id,
         leave_type_id=data['leave_type_id'],

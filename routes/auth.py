@@ -9,6 +9,7 @@ from models.user import User
 from models.company import Company
 from models.employee import Employee
 from utils.email_utils import send_signup_otp, send_reset_otp
+from utils.notification_utils import send_login_notification
 
 auth_bp = Blueprint("auth", __name__)
 JWT_SECRET = "superadmin-secret-key"
@@ -130,31 +131,45 @@ def login():
     email = data.get("email", "").lower().strip()
     password = data.get("password")
 
-    sa = SuperAdmin.query.filter_by(email=email).first()
+    # 1. Check User table (Central Auth for ALL roles)
+    user = User.query.filter_by(email=email).first()
 
-    if not sa or not check_password_hash(sa.password, password):
+    if not user or not check_password_hash(user.password, password):
         return jsonify({"message": "Invalid credentials"}), 401
 
-    if not sa.is_verified:
-        return jsonify({"message": "Please verify OTP first"}), 403
+    # 2. Role-specific checks
+    if user.role == "SUPER_ADMIN":
+        sa = SuperAdmin.query.filter_by(email=email).first()
+        if sa and not sa.is_verified:
+            return jsonify({"message": "Please verify OTP first"}), 403
+        
+    if not user.is_active:
+        return jsonify({"message": "Account is inactive"}), 403
 
     token = jwt.encode(
         {
-            "email": sa.email,
-            "role": "SUPER_ADMIN"
+            "user_id": user.id,
+            "email": user.email,
+            "role": user.role,
+            "company_id": user.company_id
         },
         current_app.config["SECRET_KEY"],
         algorithm="HS256"
     )
 
-    username = sa.email.split("@")[0]
-    # ✅ Super Admin dashboard URL (frontend decides routing)
-    base_url = f"http://localhost:5173/{username}"
+    # Frontend URL logic
+    base_url = ""
+    if user.role == "SUPER_ADMIN":
+        base_url = f"http://localhost:5173/{user.email.split('@')[0]}"
+
+    # Send login notification
+    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
+    send_login_notification(user.email, ip_address)
 
     return jsonify({
         "message": "Login successful",
         "token": token,
-        "role": "SUPER_ADMIN",
+        "role": user.role,
         "base_url": base_url
     }), 200
 

@@ -17,7 +17,7 @@ from routes.documents import documents_bp
 from routes.user import user_bp
 from routes.policies import policies_bp
 from leave import leave_bp
-
+from routes.superadmin import superadmin_bp
 app = Flask(__name__)
 app.config.from_object(Config)
 
@@ -50,6 +50,7 @@ db.init_app(app)
 app.register_blueprint(auth_bp, url_prefix="/api/auth")
 app.register_blueprint(admin_bp, url_prefix="/api/admin")
 app.register_blueprint(superadmin_bp, url_prefix="/api/superadmin")
+
 app.register_blueprint(hr_bp, url_prefix="/api/hr")
 app.register_blueprint(employee_bp, url_prefix="/api/employee")
 app.register_blueprint(attendance_bp, url_prefix="/api/attendance")

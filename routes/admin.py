@@ -21,7 +21,7 @@ def get_employees():
 @token_required
 @role_required(['ADMIN'])
 def create_employee():
-    data = request.get_json()
+    data = request.get_json(force=True)
     
     # Check if user exists
     if User.query.filter_by(email=data['email']).first():

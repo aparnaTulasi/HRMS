@@ -100,7 +100,7 @@ def approve_document(doc_id):
 @token_required
 @role_required(["ADMIN", "HR"])
 def reject_document(doc_id):
-    data = request.json
+    data = request.get_json(force=True)
     doc = EmployeeDocument.query.get_or_404(doc_id)
     
     if doc.company_id != g.user.company_id:

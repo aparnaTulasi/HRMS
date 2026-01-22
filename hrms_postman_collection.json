@@ -200,12 +200,85 @@
                         "header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"director@futureinvo.com\",\n  \"role\": \"DIRECTOR\",\n  \"company_id\": 1,\n  \"first_name\": \"Director\",\n  \"last_name\": \"One\"\n}",
+                            "raw": "{\n  \"email\": \"director@futureinvo.com\",\n  \"role\": \"DIRECTOR\",\n  \"company_id\": {{company_id}},\n  \"first_name\": \"Director\",\n  \"last_name\": \"One\",\n  \"password\": \"Director@123\"\n}",
                             "options": { "raw": { "language": "json" } }
                         },
                         "url": { "raw": "{{base_url}}/api/superadmin/users", "host": ["{{base_url}}"], "path": ["api", "superadmin", "users"] }
                     }
                 }
+                ,
+                {
+					"name": "Create Company",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"company_name\": \"Test Company\",\n  \"subdomain\": \"test\",\n  \"company_code\": \"FIS001\",\n  \"industry\": \"Technology\",\n  \"company_size\": \"50-100\",\n  \"state\": \"Andhra Pradesh\",\n  \"country\": \"India\",\n  \"city_branch\": \"Kakinada\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"event": [
+							{
+								"listen": "test",
+								"script": {
+									"exec": [
+										"var jsonData = pm.response.json();",
+										"var companyId = jsonData.id || (jsonData.company ? jsonData.company.id : null);",
+										"if (companyId) {",
+										"    pm.collectionVariables.set(\"company_id\", companyId);",
+										"    console.log(\"Company ID set to: \" + companyId);",
+										"}"
+									],
+									"type": "text/javascript"
+								}
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/superadmin/create-company",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": ["api", "superadmin", "create-company"]
+						}
+					}
+				},
+				{
+					"name": "Create Admin for Company",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"company_id\": {{company_id}},\n  \"email\": \"admin@testcompany.com\",\n  \"first_name\": \"Company\",\n  \"last_name\": \"Admin\",\n  \"password\": \"Admin@123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/superadmin/create-admin",
+							"host": ["{{base_url}}"],
+							"path": ["api", "superadmin", "create-admin"]
+						}
+					}
+				}
             ]
         },
         {
@@ -365,6 +438,11 @@
 		{
 			"key": "token",
 			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "company_id",
+			"value": "1",
 			"type": "string"
 		}
 	]

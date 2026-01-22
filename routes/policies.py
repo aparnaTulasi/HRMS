@@ -30,7 +30,7 @@ def get_categories():
 def create_category():
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403
-    data = request.get_json()
+    data = request.get_json(force=True)
     category = PolicyCategory(name=data['name'], description=data.get('description'))
     db.session.add(category)
     db.session.commit()
@@ -53,7 +53,7 @@ def get_policy(id):
 def create_policy():
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403
-    data = request.get_json()
+    data = request.get_json(force=True)
     policy = Policy(
         title=data['title'],
         description=data.get('description'),
@@ -112,7 +112,7 @@ def get_violations():
 @policies_bp.route('/violations', methods=['POST'])
 @login_required
 def report_violation():
-    data = request.get_json()
+    data = request.get_json(force=True)
     # Default to current user if offender not specified (self-report or test)
     offender_id = data.get('user_id', current_user.id)
     
@@ -129,7 +129,7 @@ def report_violation():
 @policies_bp.route('/exceptions', methods=['POST'])
 @login_required
 def request_exception():
-    data = request.get_json()
+    data = request.get_json(force=True)
     ex = PolicyException(
         policy_id=data['policy_id'],
         user_id=current_user.id,

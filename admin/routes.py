@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request, g
+
 from models import db
 from models.user import User
 from models.employee import Employee
