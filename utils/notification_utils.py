@@ -22,12 +22,12 @@ def send_async_email(msg):
         server.login(sender_email, password)
         server.send_message(msg)
         server.quit()
-        print(f"✅ Login notification sent to {msg['To']}")
+        print(f"✅ Email sent to {msg['To']}")
     except Exception as e:
-        print(f"❌ Error sending login notification: {e}")
+        print(f"❌ Error sending email: {e}")
 
-def send_login_notification(to_email, ip_address):
-    """Constructs the login notification email and starts the sending thread."""
+def send_security_alert_email(to_email, login_time):
+    """Sends a security alert email about a new login."""
     subject = "Security Alert: New Login Detected"
     
     body = f"""
@@ -37,8 +37,7 @@ def send_login_notification(to_email, ip_address):
         <p>Hello,</p>
         <p>We detected a new login to your HRMS account.</p>
         <ul>
-            <li><strong>Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}</li>
-            <li><strong>IP Address:</strong> {ip_address or 'Unknown'}</li>
+            <li><strong>Time:</strong> {login_time}</li>
         </ul>
         <p>If this was you, you can ignore this email.</p>
         <p>If you did not log in, please contact support immediately.</p>
@@ -50,6 +49,34 @@ def send_login_notification(to_email, ip_address):
 
     msg = MIMEMultipart()
     msg["From"] = os.getenv("MAIL_USERNAME", "HRMS Security")
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html"))
+
+    # Run in separate thread
+    thread = threading.Thread(target=send_async_email, args=(msg,))
+    thread.start()
+
+def send_login_success_email(to_email, login_time):
+    """Sends a confirmation email for successful login."""
+    subject = "Login Successful"
+    
+    body = f"""
+    <html>
+    <body>
+        <h3>Login Successful</h3>
+        <p>Hello,</p>
+        <p>You have logged in successfully to your HRMS account.</p>
+        <p><strong>Date & Time:</strong> {login_time}</p>
+        <p>Welcome! You can now access your dashboard.</p>
+        <br>
+        <p>Regards,<br>HRMS Team</p>
+    </body>
+    </html>
+    """
+
+    msg = MIMEMultipart()
+    msg["From"] = os.getenv("MAIL_USERNAME", "HRMS Team")
     msg["To"] = to_email
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "html"))

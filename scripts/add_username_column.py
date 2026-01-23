@@ -40,6 +40,11 @@ def add_missing_columns():
         cursor.execute("ALTER TABLE companies ADD COLUMN company_code VARCHAR(20)")
         print("✅ Added 'company_code' to companies table")
     
+    if 'timezone' not in columns:
+        print("\nAdding 'timezone' to companies table...")
+        cursor.execute("ALTER TABLE companies ADD COLUMN timezone VARCHAR(50) DEFAULT 'UTC'")
+        print("✅ Added 'timezone' to companies table")
+    
     conn.commit()
     conn.close()
     print("\n🎉 Database schema updated successfully!")

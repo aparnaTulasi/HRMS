@@ -1,15 +1,15 @@
 from flask import Blueprint, request, jsonify, current_app, session
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
-
+from zoneinfo import ZoneInfo
 from models import db
 from models.super_admin import SuperAdmin
 from models.user import User
 from models.company import Company
 from models.employee import Employee
 from utils.email_utils import send_signup_otp, send_reset_otp
-from utils.notification_utils import send_login_notification
+from utils.notification_utils import send_security_alert_email, send_login_success_email
 
 auth_bp = Blueprint("auth", __name__)
 JWT_SECRET = "superadmin-secret-key"
@@ -161,16 +161,34 @@ def login():
     base_url = ""
     if user.role == "SUPER_ADMIN":
         base_url = f"http://localhost:5173/{user.email.split('@')[0]}"
+    elif user.company:
+        username = user.email.split("@")[0]
+        company_code = user.company.company_code or ""
+        subdomain = (user.company.subdomain or "").replace("http://", "").replace("https://", "").strip().strip("/")
+        base_url = f"http://{username}{company_code}.{subdomain}"
 
-    # Send login notification
-    ip_address = request.headers.get('X-Forwarded-For', request.remote_addr)
-    send_login_notification(user.email, ip_address)
+    # Calculate login time in company timezone
+    company_timezone = "UTC"
+    if user.company and hasattr(user.company, 'timezone') and user.company.timezone:
+        company_timezone = user.company.timezone
+
+    try:
+        tz = ZoneInfo(company_timezone)
+    except Exception:
+        tz = timezone.utc
+
+    login_time_local = datetime.now(tz).strftime("%d %b %Y, %I:%M %p")
+
+    # Send login notifications (Security Alert + Success Confirmation)
+    send_security_alert_email(user.email, login_time_local)
+    send_login_success_email(user.email, login_time_local)
 
     return jsonify({
         "message": "Login successful",
         "token": token,
         "role": user.role,
-        "base_url": base_url
+        "base_url": base_url,
+        "login_time_local": login_time_local
     }), 200
 
 

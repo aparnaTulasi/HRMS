@@ -68,6 +68,7 @@ def create_company():
             state=data.get("state"),
             country=data.get("country"),
             city_branch=data.get("city_branch"),
+            timezone=data.get("timezone", "UTC"),
         )
 
         db.session.add(new_company)
