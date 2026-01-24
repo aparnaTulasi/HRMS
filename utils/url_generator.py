@@ -1,15 +1,18 @@
-import re
+def clean_domain(domain: str) -> str:
+    if not domain:
+        return ""
+    cleaned = domain.replace("http://", "").replace("https://", "").strip().strip("/")
+    if cleaned and "." not in cleaned and cleaned != "localhost":
+        return f"{cleaned}.com"
+    return cleaned
 
-def clean_username(email):
-    if not email or '@' not in email:
-        return "user"
-    username = email.split('@')[0].lower()
-    return re.sub(r'[^a-zA-Z0-9]', '', username)
+def build_web_host(email: str, company) -> str:
+    # example: jayadittakavi2004FIS001.test.com
+    username = (email.split("@")[0] or "").strip().lower()
+    code = (getattr(company, "company_code", "") or "").strip()
+    domain = clean_domain(getattr(company, "subdomain", "") or "")
+    return f"{username}{code}.{domain}"
 
-def generate_login_url(email, role, company=None):
-    username = clean_username(email)
-    if role == 'SUPER_ADMIN':
-        return f"https://{username}.superadmin.hrms.com"
-    if company:
-        return f"https://{company.subdomain}.hrms.com/{username}"
-    return f"https://hrms.com/{username}"
+def build_full_url(email: str, company) -> str:
+    # API response lo http:// kavali
+    return "http://" + build_web_host(email, company)

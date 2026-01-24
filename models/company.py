@@ -13,6 +13,7 @@ class Company(db.Model):
     state = db.Column(db.String(100), nullable=False)            # ✅ NEW
     country = db.Column(db.String(100), nullable=False)          # ✅ NEW
     city_branch = db.Column(db.String(100), nullable=False)      # ✅ NEW
+    timezone = db.Column(db.String(50), default='UTC')           # ✅ NEW
 
     # keep for existing flow (do not remove now)
     subdomain = db.Column(db.String(50), unique=False, nullable=False)

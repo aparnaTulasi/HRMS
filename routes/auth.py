@@ -10,6 +10,7 @@ from models.company import Company
 from models.employee import Employee
 from utils.email_utils import send_signup_otp, send_reset_otp
 from utils.notification_utils import send_security_alert_email, send_login_success_email
+from utils.url_generator import build_full_url
 
 auth_bp = Blueprint("auth", __name__)
 JWT_SECRET = "superadmin-secret-key"
@@ -162,10 +163,7 @@ def login():
     if user.role == "SUPER_ADMIN":
         base_url = f"http://localhost:5173/{user.email.split('@')[0]}"
     elif user.company:
-        username = user.email.split("@")[0]
-        company_code = user.company.company_code or ""
-        subdomain = (user.company.subdomain or "").replace("http://", "").replace("https://", "").strip().strip("/")
-        base_url = f"http://{username}{company_code}.{subdomain}"
+        base_url = build_full_url(user.email, user.company)
 
     # Calculate login time in company timezone
     company_timezone = "UTC"

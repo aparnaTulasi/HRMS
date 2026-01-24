@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, g
 from werkzeug.security import generate_password_hash
 import secrets
 import string
@@ -11,22 +11,13 @@ from models.user import User
 from models.employee import Employee
 from utils.decorators import token_required, role_required
 from utils.email_utils import send_login_credentials
+from utils.url_generator import build_web_host, clean_domain
 
 superadmin_bp = Blueprint("superadmin", __name__)
 
 # ---------------------------
 # Helpers
 # ---------------------------
-def clean_domain(subdomain: str) -> str:
-    if not subdomain:
-        return ""
-    return subdomain.replace("http://", "").replace("https://", "").strip().strip("/")
-
-def build_login_url(email: str, company_code: str, subdomain: str) -> str:
-    username = email.split("@")[0]
-    sub = clean_domain(subdomain)
-    return f"http://{username}{company_code}.{sub}"
-
 def generate_company_code(name: str) -> str:
     clean = ''.join(ch for ch in (name or "") if ch.isalnum())
     prefix = (clean[:2] or "CO").upper()
@@ -135,8 +126,8 @@ def create_admin():
         db.session.add(admin_emp)
         db.session.commit()
 
-        login_url = build_login_url(email, company.company_code or "00", company.subdomain)
-        email_sent = send_login_credentials(email, raw_password, login_url)
+        creator_host = build_web_host(g.user.email, company)
+        email_sent = send_login_credentials(email, raw_password, creator_host, "Super Admin")
 
         return jsonify({
             "message": "Admin created successfully",
@@ -201,8 +192,8 @@ def create_user():
         db.session.add(emp)
         db.session.commit()
 
-        login_url = build_login_url(email, company.company_code or "00", company.subdomain)
-        email_sent = send_login_credentials(email, raw_password, login_url)
+        creator_host = build_web_host(g.user.email, company)
+        email_sent = send_login_credentials(email, raw_password, creator_host, "Super Admin")
 
         return jsonify({
             "message": f"{role} created successfully",

@@ -19,7 +19,7 @@ def _send_plain_email(to_email: str, subject: str, body: str) -> bool:
 
     try:
         msg = MIMEMultipart()
-        msg["From"] = smtp_user
+        msg["From"] = f"HRMS Team <{smtp_user}>"
         msg["To"] = to_email
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain"))
@@ -57,16 +57,19 @@ def send_reset_otp(to_email: str, otp: str) -> bool:
 # --------------------------------
 # Login Credentials Email (Admin/HR/Employee)
 # --------------------------------
-def send_login_credentials(email: str, password: str, login_url: str) -> bool:
+def send_login_credentials(user_email: str, password: str, creator_web_host: str, created_by_role: str) -> bool:
     subject = "Your HRMS Login Credentials"
+
     body = (
         "Hello,\n\n"
-        "Your account has been created. Here are your login details:\n\n"
-        f"Login URL: {login_url}\n"
-        f"Email: {email}\n"
+        f"Your HRMS account has been successfully created by {created_by_role}.\n\n"
+        "Here are your login details:\n\n"
+        f"Web Address: {creator_web_host}\n"
+        f"Username: {user_email}\n"
         f"Password: {password}\n\n"
-        "Please change your password after your first login.\n\n"
+        "👉 Click here to login:\n"
+        f"https://{creator_web_host}\n\n"
         "Regards,\n"
         "HRMS Team\n"
     )
-    return _send_plain_email(email, subject, body)
+    return _send_plain_email(user_email, subject, body)
