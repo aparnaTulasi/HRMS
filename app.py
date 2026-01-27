@@ -5,6 +5,7 @@ import re
 from flask_cors import CORS
 from models import db
 from config import Config
+from flask_jwt_extended import JWTManager
 
 # Import Blueprints
 from routes.auth import auth_bp
@@ -17,7 +18,6 @@ from routes.documents import documents_bp
 from routes.user import user_bp
 from routes.policies import policies_bp
 from leave import leave_bp
-from routes.superadmin import superadmin_bp
 app = Flask(__name__)
 app.config.from_object(Config)
 
@@ -31,6 +31,8 @@ def log_request_info():
 app.config["SECRET_KEY"] = Config.SECRET_KEY
 app.config["SESSION_PERMANENT"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=10)
+
+jwt = JWTManager(app)
 
 CORS(
     app,

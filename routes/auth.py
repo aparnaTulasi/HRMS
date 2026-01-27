@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app, session
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask_jwt_extended import create_access_token
 from datetime import datetime, timedelta, timezone
 import jwt
 from zoneinfo import ZoneInfo
@@ -8,9 +9,9 @@ from models.super_admin import SuperAdmin
 from models.user import User
 from models.company import Company
 from models.employee import Employee
-from utils.email_utils import send_signup_otp, send_reset_otp
-from utils.notification_utils import send_security_alert_email, send_login_success_email
-from utils.url_generator import build_full_url
+from utils.email_utils import send_signup_otp, send_reset_otp, send_login_success_email
+from utils.notification_utils import send_security_alert_email
+from utils.url_generator import build_company_base_url
 
 auth_bp = Blueprint("auth", __name__)
 JWT_SECRET = "superadmin-secret-key"
@@ -125,68 +126,53 @@ def verify_signup_otp():
 # -----------------------------
 # 3️⃣ LOGIN
 # -----------------------------
-@auth_bp.route("/login", methods=["POST"])
+@auth_bp.route('/login', methods=['POST'])
 def login():
-    data = request.get_json()
+    data = request.get_json(force=True)
+    email = (data.get('email') or data.get('company_email') or "").strip().lower()
+    password = data.get('password')
 
-    email = data.get("email", "").lower().strip()
-    password = data.get("password")
+    if not email or not password:
+        return jsonify({'message': 'email and password are required'}), 400
 
-    # 1. Check User table (Central Auth for ALL roles)
     user = User.query.filter_by(email=email).first()
 
     if not user or not check_password_hash(user.password, password):
-        return jsonify({"message": "Invalid credentials"}), 401
+        return jsonify({'message': 'Invalid credentials'}), 401
 
-    # 2. Role-specific checks
-    if user.role == "SUPER_ADMIN":
-        sa = SuperAdmin.query.filter_by(email=email).first()
-        if sa and not sa.is_verified:
-            return jsonify({"message": "Please verify OTP first"}), 403
-        
     if not user.is_active:
-        return jsonify({"message": "Account is inactive"}), 403
+        return jsonify({'message': 'User account is inactive'}), 403
 
-    token = jwt.encode(
-        {
-            "user_id": user.id,
-            "email": user.email,
-            "role": user.role,
-            "company_id": user.company_id
-        },
-        current_app.config["SECRET_KEY"],
-        algorithm="HS256"
-    )
+    # Generate token
+    token = create_access_token(identity=user.id, additional_claims={'role': user.role})
 
-    # Frontend URL logic
-    base_url = ""
-    if user.role == "SUPER_ADMIN":
-        base_url = f"http://localhost:5173/{user.email.split('@')[0]}"
-    elif user.company:
-        base_url = build_full_url(user.email, user.company)
+    # Get company and send login success email
+    company = Company.query.get(user.company_id) if user.company_id else None
+    send_login_success_email(user.email)
 
-    # Calculate login time in company timezone
-    company_timezone = "UTC"
-    if user.company and hasattr(user.company, 'timezone') and user.company.timezone:
-        company_timezone = user.company.timezone
+    # Determine Redirect URL
+    ROLE_PATHS = {
+        "SUPER_ADMIN": "/super/dashboard",
+        "ADMIN": "/admin/dashboard",
+        "HR": "/hr/dashboard",
+        "EMPLOYEE": "/employee/dashboard",
+    }
 
-    try:
-        tz = ZoneInfo(company_timezone)
-    except Exception:
-        tz = timezone.utc
-
-    login_time_local = datetime.now(tz).strftime("%d %b %Y, %I:%M %p")
-
-    # Send login notifications (Security Alert + Success Confirmation)
-    send_security_alert_email(user.email, login_time_local)
-    send_login_success_email(user.email, login_time_local)
+    base_url = build_company_base_url(company.subdomain if company else "")
+    path = ROLE_PATHS.get(user.role, "/")
+    redirect_url = f"{base_url}{path}"
 
     return jsonify({
-        "message": "Login successful",
-        "token": token,
-        "role": user.role,
-        "base_url": base_url,
-        "login_time_local": login_time_local
+        'message': 'Login successful',
+        'token': token,
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'role': user.role,
+            'company_id': user.company_id,
+            'subdomain': company.subdomain if company else None
+        },
+        'redirect_url': redirect_url
     }), 200
 
 

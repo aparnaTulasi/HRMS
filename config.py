@@ -14,6 +14,11 @@ class Config:
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
     BASE_URL = "http://localhost:5000"
 
+    # Frontend Config
+    FRONTEND_BASE_DOMAIN = "company.com"
+    FRONTEND_PROTOCOL = "https"
+    FRONTEND_LOCAL = "http://localhost:5173"
+
     # Email Configuration
     MAIL_SERVER = "smtp.gmail.com"
     MAIL_USE_TLS = True

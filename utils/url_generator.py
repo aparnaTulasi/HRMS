@@ -1,18 +1,29 @@
-def clean_domain(domain: str) -> str:
-    if not domain:
+from flask import current_app
+
+def clean_domain(s: str) -> str:
+    if not s:
         return ""
-    cleaned = domain.replace("http://", "").replace("https://", "").strip().strip("/")
-    if cleaned and "." not in cleaned and cleaned != "localhost":
-        return f"{cleaned}.com"
-    return cleaned
+    return s.replace("http://", "").replace("https://", "").strip().strip("/")
 
-def build_web_host(email: str, company) -> str:
-    # example: jayadittakavi2004FIS001.test.com
-    username = (email.split("@")[0] or "").strip().lower()
-    code = (getattr(company, "company_code", "") or "").strip()
-    domain = clean_domain(getattr(company, "subdomain", "") or "")
-    return f"{username}{code}.{domain}"
+ROOT_DOMAIN = "company.com"
 
-def build_full_url(email: str, company) -> str:
-    # API response lo http:// kavali
-    return "http://" + build_web_host(email, company)
+def build_web_address(subdomain: str) -> str:
+    sub = clean_domain(subdomain)
+    if not sub:
+        return "localhost:5173"
+    return f"{sub}.{ROOT_DOMAIN}"
+
+def build_common_login_url(subdomain: str) -> str:
+    sub = clean_domain(subdomain)
+    if not sub:
+        return "http://localhost:5173/login"
+    return f"https://{sub}.{ROOT_DOMAIN}/login"
+
+def build_company_base_url(subdomain: str) -> str:
+    sub = (subdomain or "").strip().lower()
+    if not sub:
+        return current_app.config.get("FRONTEND_LOCAL", "http://localhost:5173")
+
+    protocol = current_app.config.get("FRONTEND_PROTOCOL", "https")
+    base_domain = current_app.config.get("FRONTEND_BASE_DOMAIN", "company.com")
+    return f"{protocol}://{sub}.{base_domain}"

@@ -2,6 +2,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask import current_app
+from datetime import datetime
 
 
 def _send_plain_email(to_email: str, subject: str, body: str) -> bool:
@@ -73,3 +74,42 @@ def send_login_credentials(user_email: str, password: str, creator_web_host: str
         "HRMS Team\n"
     )
     return _send_plain_email(user_email, subject, body)
+
+def send_account_created_alert(personal_email: str, company_name: str, created_by: str) -> bool:
+    subject = "Account Created Alert"
+    body = (
+        "Hello,\n\n"
+        f"An account was created for you in {company_name} by {created_by}.\n"
+        f"Date: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
+        f"Regards,\n"
+        f"{company_name}\n"
+    )
+    return _send_plain_email(personal_email, subject, body)
+
+def send_login_credentials(personal_email: str, company_email: str, password: str,
+                           company_name: str, web_address: str, login_url: str, created_by: str) -> bool:
+    subject = "Login Details"
+    body = (
+        "Hello,\n\n"
+        f"Your account has been created by {created_by}.\n\n"
+        "Login Details:\n"
+        f"Web Address: {web_address}\n"
+        f"Username: {company_email}\n"
+        f"Password: {password}\n\n"
+        "👉 Click here to login:\n"
+        f"{login_url}\n\n"
+        f"Regards,\n"
+        f"{company_name}\n"
+    )
+    return _send_plain_email(personal_email, subject, body)
+
+def send_login_success_email(to_email: str) -> bool:
+    subject = "Login Successful"
+    body = (
+        "Hello,\n\n"
+        "Login successful.\n"
+        f"Date & Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Regards,\n"
+        "Company Team\n"
+    )
+    return _send_plain_email(to_email, subject, body)

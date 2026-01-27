@@ -26,13 +26,34 @@ def clean_admin_users():
 
         print(f"found {len(admin_ids)} ADMIN users. Cleaning up...")
 
-        # 2. Delete associated employees first (to maintain integrity)
         ids_placeholder = ','.join('?' for _ in admin_ids)
-        
-        print("🧹 Deleting associated records from 'employees' table...")
-        cursor.execute(f"DELETE FROM employees WHERE user_id IN ({ids_placeholder})", admin_ids)
 
-        # 3. Delete from users table
+        # 2. Find associated employees to clean related data
+        cursor.execute(f"SELECT id FROM employees WHERE user_id IN ({ids_placeholder})", admin_ids)
+        emp_rows = cursor.fetchall()
+        emp_ids = [row[0] for row in emp_rows]
+
+        if emp_ids:
+            emp_placeholder = ','.join('?' for _ in emp_ids)
+            
+            # Delete related data from dependent tables
+            related_tables = ['employee_documents', 'employee_address', 'employee_bank_details', 'attendance', 'leaves', 'leave_balances']
+            for table in related_tables:
+                try:
+                    cursor.execute(f"DELETE FROM {table} WHERE employee_id IN ({emp_placeholder})", emp_ids)
+                except sqlite3.OperationalError:
+                    pass # Table might not exist
+        
+            print("🧹 Deleting associated records from 'employees' table...")
+            cursor.execute(f"DELETE FROM employees WHERE id IN ({emp_placeholder})", emp_ids)
+
+        # 3. Clean user permissions
+        try:
+            cursor.execute(f"DELETE FROM user_permissions WHERE user_id IN ({ids_placeholder})", admin_ids)
+        except sqlite3.OperationalError:
+            pass
+
+        # 4. Delete from users table
         print("🧹 Deleting records from 'users' table...")
         cursor.execute(f"DELETE FROM users WHERE id IN ({ids_placeholder})", admin_ids)
         

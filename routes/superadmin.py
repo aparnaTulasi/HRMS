@@ -10,8 +10,8 @@ from models.company import Company
 from models.user import User
 from models.employee import Employee
 from utils.decorators import token_required, role_required
-from utils.email_utils import send_login_credentials
-from utils.url_generator import build_web_host, clean_domain
+from utils.email_utils import send_login_credentials, send_account_created_alert
+from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 
 superadmin_bp = Blueprint("superadmin", __name__)
 
@@ -89,23 +89,25 @@ def create_company():
 def create_admin():
     data = request.get_json(force=True)
 
-    if not data.get("company_id") or not data.get("email") or not data.get("password"):
-        return jsonify({"message": "company_id, email, and password are required"}), 400
+    if not data.get("company_id") or not data.get("company_email") or not data.get("password") or not data.get("personal_email"):
+        return jsonify({"message": "company_id, company_email, personal_email, and password are required"}), 400
 
     company = Company.query.get(data["company_id"])
     if not company:
         return jsonify({"message": "Company not found"}), 404
 
-    email = data["email"].strip().lower()
-    if User.query.filter_by(email=email).first():
-        return jsonify({"message": "User already exists"}), 409
+    company_email = data["company_email"].strip().lower()
+    personal_email = data["personal_email"].strip().lower()
+
+    if User.query.filter_by(email=company_email).first():
+        return jsonify({"message": "User with this company email already exists"}), 409
 
     try:
         raw_password = data["password"]
         hashed_password = generate_password_hash(raw_password, method="pbkdf2:sha256")
 
         new_admin = User(
-            email=email,
+            email=company_email,
             password=hashed_password,
             role="ADMIN",
             company_id=company.id,
@@ -119,19 +121,37 @@ def create_admin():
             company_id=company.id,
             first_name=data.get("first_name", "Admin"),
             last_name=data.get("last_name", "User"),
-            department="Management",
-            designation="Admin",
-            date_of_joining=datetime.utcnow()
+            department=data.get("department", "Management"),
+            designation=data.get("designation", "Admin"),
+            date_of_joining=datetime.utcnow(),
+            personal_email=personal_email,
+            company_email=company_email
         )
         db.session.add(admin_emp)
         db.session.commit()
 
-        creator_host = build_web_host(g.user.email, company)
-        email_sent = send_login_credentials(email, raw_password, creator_host, "Super Admin")
+        web_address = build_web_address(company.subdomain)
+        login_url = build_common_login_url(company.subdomain)
+        created_by = "Super Admin"
+
+        # Mail 1: Account Created
+        send_account_created_alert(personal_email, company.company_name, created_by)
+
+        # Mail 2: Login Credentials
+        email_sent = send_login_credentials(
+            personal_email=personal_email,
+            company_email=company_email,
+            password=raw_password,
+            company_name=company.company_name,
+            web_address=web_address,
+            login_url=login_url,
+            created_by=created_by
+        )
 
         return jsonify({
             "message": "Admin created successfully",
-            "admin_email": email,
+            "company_email": company_email,
+            "personal_email": personal_email,
             "email_sent": email_sent
         }), 201
 
@@ -192,8 +212,18 @@ def create_user():
         db.session.add(emp)
         db.session.commit()
 
-        creator_host = build_web_host(g.user.email, company)
-        email_sent = send_login_credentials(email, raw_password, creator_host, "Super Admin")
+        web_address = build_web_address(company.subdomain)
+        login_url = build_common_login_url(company.subdomain)
+        
+        email_sent = send_login_credentials(
+            personal_email=email,
+            company_email=email,
+            password=raw_password,
+            company_name=company.company_name,
+            web_address=web_address,
+            login_url=login_url,
+            created_by="Super Admin"
+        )
 
         return jsonify({
             "message": f"{role} created successfully",
