@@ -1,24 +1,42 @@
-from models import db
 from datetime import datetime
+from models import db
 
 class Employee(db.Model):
     __tablename__ = 'employees'
-
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    employee_id = db.Column(db.String(50), unique=True) # emp_code
+    first_name = db.Column(db.String(50), nullable=False)
+    last_name = db.Column(db.String(50), nullable=False)
+    gender = db.Column(db.String(10))
+    date_of_birth = db.Column(db.Date)
     
-    first_name = db.Column(db.String(100))
-    last_name = db.Column(db.String(100))
-    department = db.Column(db.String(100))
-    designation = db.Column(db.String(100))
-    date_of_joining = db.Column(db.Date)
+    father_or_husband_name = db.Column(db.String(100))
+    mother_name = db.Column(db.String(100))
     
     personal_email = db.Column(db.String(120))
+    personal_mobile = db.Column(db.String(20))
     company_email = db.Column(db.String(120))
+    work_phone = db.Column(db.String(20))
     
+    department = db.Column(db.String(50))
+    designation = db.Column(db.String(50))
+    work_mode = db.Column(db.String(20)) # WFH/Office/Field
+    branch_id = db.Column(db.Integer)
+    
+    aadhaar_number = db.Column(db.String(20), unique=True)
+    pan_number = db.Column(db.String(20), unique=True)
+    
+    date_of_joining = db.Column(db.Date)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    bank_details = db.relationship('EmployeeBankDetails', backref='employee', uselist=False, lazy=True)
+    addresses = db.relationship('EmployeeAddress', backref='employee', lazy=True)
+    documents = db.relationship('EmployeeDocument', backref='employee', lazy=True)
+    attendance_records = db.relationship('Attendance', backref='employee', lazy=True)
 
-    def __repr__(self):
-        return f'<Employee {self.id} - {self.first_name} {self.last_name}>'
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}"

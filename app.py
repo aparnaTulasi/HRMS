@@ -18,6 +18,7 @@ from routes.documents import documents_bp
 from routes.user import user_bp
 from routes.policies import policies_bp
 from leave import leave_bp
+from routes.approvals import approvals_bp
 app = Flask(__name__)
 app.config.from_object(Config)
 
@@ -60,6 +61,7 @@ app.register_blueprint(documents_bp, url_prefix="/api/documents")
 app.register_blueprint(user_bp, url_prefix="/api/user")
 app.register_blueprint(policies_bp, url_prefix="/api/policies")
 app.register_blueprint(leave_bp)
+app.register_blueprint(approvals_bp, url_prefix="/api/approvals")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

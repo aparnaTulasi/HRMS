@@ -31,7 +31,6 @@ def delete_path(path):
 app_py_content = """
 from flask import Flask, jsonify
 from flask_cors import CORS
-from flask_login import LoginManager
 from config import Config
 from models import db
 
@@ -40,18 +39,6 @@ app.config.from_object(Config)
 
 CORS(app)
 db.init_app(app)
-
-login_manager = LoginManager()
-login_manager.init_app(app)
-
-@login_manager.user_loader
-def load_user(user_id):
-    from models.user import User
-    return User.query.get(int(user_id))
-
-@login_manager.unauthorized_handler
-def unauthorized():
-    return jsonify({'message': 'Authentication required'}), 401
 
 # Import blueprints
 from routes.auth import auth_bp
@@ -178,25 +165,32 @@ class Employee(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    company_code = db.Column(db.String(20))
     employee_id = db.Column(db.String(50), unique=True)
     first_name = db.Column(db.String(50), nullable=False)
-    last_name = db.Column(db.String(50), nullable=False)
+        last_name = db.Column(db.String(50), nullable=False)
     gender = db.Column(db.String(10))
     date_of_birth = db.Column(db.Date)
+    father_or_husband_name = db.Column(db.String(100))
+    mother_name = db.Column(db.String(100))
     department = db.Column(db.String(50))
     designation = db.Column(db.String(50))
     date_of_joining = db.Column(db.Date)
     work_phone = db.Column(db.String(20))
     personal_mobile = db.Column(db.String(20))
     personal_email = db.Column(db.String(120))
+    company_email = db.Column(db.String(120))
+    work_mode = db.Column(db.String(20))
+    branch_id = db.Column(db.Integer)
     aadhaar_number = db.Column(db.String(20), unique=True)
     pan_number = db.Column(db.String(20), unique=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     bank_details = db.relationship('EmployeeBankDetails', backref='employee', uselist=False, lazy=True)
-    address = db.relationship('EmployeeAddress', backref='employee', uselist=False, lazy=True)
+    addresses = db.relationship('EmployeeAddress', backref='employee', lazy=True)
     documents = db.relationship('EmployeeDocument', backref='employee', lazy=True)
     attendance_records = db.relationship('Attendance', backref='employee', lazy=True)
+
 
     @property
     def full_name(self):
@@ -309,12 +303,13 @@ from models import db
 class EmployeeAddress(db.Model):
     __tablename__ = 'employee_address'
     id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), unique=True, nullable=False)
-    address_line1 = db.Column(db.String(200))
-    permanent_address = db.Column(db.String(200))
-    city = db.Column(db.String(50))
-    state = db.Column(db.String(50))
-    zip_code = db.Column(db.String(20))
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    address_type = db.Column(db.String(20)) # PRESENT / PERMANENT
+    address_line = db.Column(db.String(255))
+    city = db.Column(db.String(100))
+    state = db.Column(db.String(100))
+    pincode = db.Column(db.String(20))
+    country = db.Column(db.String(100))
 """
 
 models_employee_bank_py_content = """
@@ -516,8 +511,8 @@ def get_profile():
         'last_name': emp.last_name,
         'department': emp.department,
         'designation': emp.designation,
-        'phone': emp.work_phone,
-        'date_of_joining': emp.date_of_joining
+        'phone': getattr(emp, 'work_phone', None),
+        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None
     })
 
 # Other employee routes like /bank, /address etc. would go here
@@ -546,7 +541,7 @@ def mark_in_time():
         existing.in_time = datetime.utcnow()
         existing.status = 'PRESENT'
     else:
-        attendance = Attendance(employee_id=emp.id, date=today, in_time=datetime.utcnow(), status='PRESENT', year=today.year, month=today.month)
+        attendance = Attendance(employee_id=emp.id, date=today, in_time=datetime.utcnow(), status='PRESENT')
         db.session.add(attendance)
     db.session.commit()
     return jsonify({'message': 'In time marked successfully'})
@@ -650,25 +645,49 @@ class LeaveBalance(db.Model):
 
 leave_routes_py_content = """
 from flask import request, jsonify
-from flask_login import login_required, current_user
+from utils.decorators import token_required, role_required
 from . import leave_bp
 from .models import Leave
 from models import db
+from models.employee import Employee
+from datetime import datetime
 
 @leave_bp.route('/apply', methods=['POST'])
-@login_required
+@token_required
 def apply_leave():
     data = request.get_json()
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        return jsonify({'message': 'Employee profile not found'}), 404
+
     new_leave = Leave(
-        employee_id=current_user.id,
+        employee_id=emp.id,
         leave_type_id=data['leave_type_id'],
-        start_date=data['start_date'],
-        end_date=data['end_date'],
+        start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
+        end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date(),
         reason=data['reason']
     )
     db.session.add(new_leave)
     db.session.commit()
     return jsonify({'message': 'Leave application submitted'}), 201
+
+@leave_bp.route('/<int:id>/approve', methods=['POST'])
+@token_required
+@role_required(['HR', 'MANAGER', 'ADMIN'])
+def approve_leave(id):
+    leave = Leave.query.get_or_404(id)
+    
+    approver_emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not approver_emp:
+        return jsonify({'message': 'Approver profile not found'}), 404
+
+    if leave.employee_id == approver_emp.id:
+        return jsonify({'message': 'Cannot approve your own leave'}), 403
+        
+    data = request.get_json()
+    leave.status = data.get('status', 'APPROVED')
+    db.session.commit()
+    return jsonify({'message': f'Leave {leave.status.lower()}'})
 """
 
 utils_decorators_py_content = """

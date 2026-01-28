@@ -18,6 +18,27 @@ def _parse_date(date_str):
     from datetime import datetime
     return datetime.strptime(date_str, "%Y-%m-%d").date()
 
+def _generate_employee_id(company_id):
+    """Generates a new unique employee ID like 'COMPCODE-0001'."""
+    company = Company.query.get(company_id)
+    prefix = company.company_code if company and company.company_code else "EMP"
+
+    # Find the last employee for this company to determine the next number
+    last_employee = Employee.query.filter(Employee.employee_id.like(f"{prefix}-%")).order_by(db.desc(Employee.id)).first()
+
+    if last_employee and last_employee.employee_id:
+        try:
+            last_num = int(last_employee.employee_id.split('-')[-1])
+            next_num = last_num + 1
+        except (ValueError, IndexError):
+            # Fallback: count existing employees for that company
+            next_num = Employee.query.filter_by(company_id=company_id).count() + 1
+    else:
+        # First employee
+        next_num = 1
+    return f"{prefix}-{next_num:04d}"
+
+
 @admin_bp.route("/hr", methods=["POST"])
 @token_required
 @role_required(["ADMIN"])
@@ -59,6 +80,8 @@ def create_hr():
         new_emp = Employee(
             user_id=new_user.id,
             company_id=company.id,
+            company_code=company.company_code,
+            employee_id=_generate_employee_id(company.id),
             first_name=first_name,
             last_name=last_name,
             department=department,
@@ -88,6 +111,7 @@ def create_hr():
 
         return jsonify({
             "message": "HR created successfully",
+            "employee_id": new_emp.employee_id,
             "company_email": company_email,
             "personal_email": personal_email,
             "alert_sent": alert_sent,
@@ -126,26 +150,27 @@ def create_employee():
 
     for data in data_list:
         try:
-            email = (data.get("email") or "").strip().lower()
+            company_email = (data.get("company_email") or "").strip().lower()
+            personal_email = (data.get("personal_email") or "").strip().lower()
             password = (data.get("password") or "").strip()
 
-            if not email or not password:
-                results.append(({"email": email, "message": "email and password are required"}, 400))
+            if not company_email or not password or not personal_email:
+                results.append(({"email": company_email, "message": "company_email, personal_email, and password are required"}, 400))
                 continue
 
-            if User.query.filter_by(email=email).first():
-                results.append(({"email": email, "message": "User with this email already exists"}, 409))
+            if User.query.filter_by(email=company_email).first():
+                results.append(({"email": company_email, "message": "User with this company email already exists"}, 409))
                 continue
 
             role = (data.get("role") or "EMPLOYEE").strip().upper()
             if role in ["SUPER_ADMIN", "ADMIN"]:
-                results.append(({"email": email, "message": f"Cannot create role: {role}"}, 403))
+                results.append(({"email": company_email, "message": f"Cannot create role: {role}"}, 403))
                 continue
 
-            hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
+            hashed_password = generate_password_hash(password)
 
             new_user = User(
-                email=email,
+                email=company_email,
                 password=hashed_password,
                 role=role,
                 company_id=g.user.company_id,
@@ -160,18 +185,21 @@ def create_employee():
                     doj = _parse_date(data.get("date_of_joining"))
                 except ValueError:
                     db.session.rollback()
-                    results.append(({"email": email, "message": "Invalid date format. Use YYYY-MM-DD"}, 400))
+                    results.append(({"email": company_email, "message": "Invalid date format. Use YYYY-MM-DD"}, 400))
                     continue
 
             new_emp = Employee(
                 user_id=new_user.id,
                 company_id=g.user.company_id,
+                company_code=company.company_code,
+                employee_id=_generate_employee_id(g.user.company_id),
                 first_name=data.get("first_name", "Employee"),
                 last_name=data.get("last_name", "User"),
                 department=data.get("department"),
                 designation=data.get("designation", role),
                 date_of_joining=doj,
-                company_email=email
+                company_email=company_email,
+                personal_email=personal_email
             )
             db.session.add(new_emp)
             db.session.commit()
@@ -180,9 +208,10 @@ def create_employee():
             login_url = build_common_login_url(company.subdomain)
             created_by = g.user.role.replace("_", " ").title()
             
+
             email_sent = send_login_credentials(
-                personal_email=email,
-                company_email=email,
+                personal_email=personal_email,
+                company_email=company_email,
                 password=password,
                 company_name=company.company_name,
                 web_address=web_address,
@@ -191,18 +220,20 @@ def create_employee():
             )
 
             results.append(({
-                "email": email,
+                "employee_id": new_emp.employee_id,
+                "company_email": company_email,
                 "message": f"{role} created",
-                "email_sent": email_sent
+                "email_sent_to": personal_email,
+                "email_sent_status": email_sent
             }, 201))
 
         except IntegrityError as e:
             db.session.rollback()
-            results.append(({"email": data.get("email"), "message": "DB integrity error", "error": str(e)}, 400))
+            results.append(({"email": data.get("company_email"), "message": "DB integrity error", "error": str(e)}, 400))
 
         except Exception as e:
             db.session.rollback()
-            results.append(({"email": data.get("email"), "message": "Server error", "error": str(e)}, 500))
+            results.append(({"email": data.get("company_email"), "message": "Server error", "error": str(e)}, 500))
 
     if not is_bulk:
         return jsonify(results[0][0]), results[0][1]

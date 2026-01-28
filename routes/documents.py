@@ -3,6 +3,7 @@ from flask import Blueprint, request, jsonify, send_file, current_app, g
 from werkzeug.utils import secure_filename
 from models import db
 from models.employee_documents import EmployeeDocument
+from models.employee import Employee
 from utils.decorators import token_required, role_required
 import uuid
 from datetime import datetime
@@ -38,8 +39,12 @@ def upload_document():
     # Get file size
     file_size = os.path.getsize(file_path)
 
+    emp = Employee.query.filter_by(user_id=current_user.id).first()
+    if not emp:
+        return jsonify({"message": "Employee profile not found"}), 404
+
     new_document = EmployeeDocument(
-        employee_id=current_user.id,
+        employee_id=emp.id,
         company_id=current_user.company_id,
         document_type=document_type,
         file_name=filename,

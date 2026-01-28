@@ -291,10 +291,10 @@
                         "header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"email\": \"emp1@futureinvo.com\",\n  \"first_name\": \"Naveen\",\n  \"last_name\": \"Kumar\",\n  \"department\": \"IT\",\n  \"designation\": \"Software Engineer\",\n  \"date_of_joining\": \"2026-01-10\",\n  \"password\": \"Welcome@123\"\n}",
+							"raw": "{\n  \"company_email\": \"emp1@futureinvo.com\",\n  \"personal_email\": \"naveen.personal@example.com\",\n  \"first_name\": \"Naveen\",\n  \"last_name\": \"Kumar\",\n  \"department\": \"IT\",\n  \"designation\": \"Software Engineer\",\n  \"date_of_joining\": \"2026-01-10\",\n  \"password\": \"Welcome@123\",\n  \"role\": \"EMPLOYEE\"\n}",
                             "options": { "raw": { "language": "json" } }
                         },
-                        "url": { "raw": "{{base_url}}/api/admin/create-employee", "host": ["{{base_url}}"], "path": ["api", "admin", "create-employee"] }
+						"url": { "raw": "{{base_url}}/api/admin/employees", "host": ["{{base_url}}"], "path": ["api", "admin", "employees"] }
                     }
                 },
                 {

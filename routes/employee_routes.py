@@ -517,7 +517,7 @@ def get_profile():
         'department': emp.department,
         'designation': emp.designation,
         'phone': emp.work_phone,
-        'date_of_joining': emp.date_of_joining
+        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None
     })
 
 # Other employee routes like /bank, /address etc. would go here

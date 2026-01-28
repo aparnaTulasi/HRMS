@@ -172,7 +172,6 @@ class Company(db.Model):
 models_employee_py_content = """
 from datetime import datetime
 from models import db
-
 class Employee(db.Model):
     __tablename__ = 'employees'
     id = db.Column(db.Integer, primary_key=True)
@@ -516,8 +515,8 @@ def get_profile():
         'last_name': emp.last_name,
         'department': emp.department,
         'designation': emp.designation,
-        'phone': emp.work_phone,
-        'date_of_joining': emp.date_of_joining
+        'phone': getattr(emp, 'work_phone', None),
+        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None
     })
 
 # Other employee routes like /bank, /address etc. would go here

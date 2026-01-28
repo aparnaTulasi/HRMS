@@ -516,8 +516,8 @@ def get_profile():
         'last_name': emp.last_name,
         'department': emp.department,
         'designation': emp.designation,
-        'phone': emp.work_phone,
-        'date_of_joining': emp.date_of_joining
+        'phone': getattr(emp, 'work_phone', None),
+        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None
     })
 
 # Other employee routes like /bank, /address etc. would go here
@@ -546,7 +546,7 @@ def mark_in_time():
         existing.in_time = datetime.utcnow()
         existing.status = 'PRESENT'
     else:
-        attendance = Attendance(employee_id=emp.id, date=today, in_time=datetime.utcnow(), status='PRESENT', year=today.year, month=today.month)
+        attendance = Attendance(employee_id=emp.id, date=today, in_time=datetime.utcnow(), status='PRESENT')
         db.session.add(attendance)
     db.session.commit()
     return jsonify({'message': 'In time marked successfully'})
@@ -649,26 +649,50 @@ class LeaveBalance(db.Model):
 """
 
 leave_routes_py_content = """
-from flask import request, jsonify
-from flask_login import login_required, current_user
+from flask import request, jsonify, g
+from utils.decorators import token_required, role_required
 from . import leave_bp
 from .models import Leave
 from models import db
+from models.employee import Employee
+from datetime import datetime
 
 @leave_bp.route('/apply', methods=['POST'])
-@login_required
+@token_required
 def apply_leave():
     data = request.get_json()
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        return jsonify({'message': 'Employee profile not found'}), 404
+
     new_leave = Leave(
-        employee_id=current_user.id,
+        employee_id=emp.id,
         leave_type_id=data['leave_type_id'],
-        start_date=data['start_date'],
-        end_date=data['end_date'],
+        start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
+        end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date(),
         reason=data['reason']
     )
     db.session.add(new_leave)
     db.session.commit()
     return jsonify({'message': 'Leave application submitted'}), 201
+
+@leave_bp.route('/<int:id>/approve', methods=['POST'])
+@token_required
+@role_required(['HR', 'MANAGER', 'ADMIN'])
+def approve_leave(id):
+    leave = Leave.query.get_or_404(id)
+    
+    approver_emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not approver_emp:
+        return jsonify({'message': 'Approver profile not found'}), 404
+
+    if leave.employee_id == approver_emp.id:
+        return jsonify({'message': 'Cannot approve your own leave'}), 403
+        
+    data = request.get_json()
+    leave.status = data.get('status', 'APPROVED')
+    db.session.commit()
+    return jsonify({'message': f'Leave {leave.status.lower()}'})
 """
 
 utils_decorators_py_content = """

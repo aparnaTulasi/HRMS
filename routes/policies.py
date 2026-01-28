@@ -1,17 +1,17 @@
-from flask import Blueprint, request, jsonify, send_from_directory, current_app
-from flask_login import login_required, current_user
+from flask import Blueprint, request, jsonify, send_from_directory, current_app, g
 from models import db
 from models.policy import Policy, PolicyCategory, PolicyAcknowledgment, PolicyViolation, PolicyException
 from models.user import User
 from datetime import datetime
 import os
 from werkzeug.utils import secure_filename
+from utils.decorators import token_required
 
 policies_bp = Blueprint('policies', __name__)
 
 # Helper for role check
 def is_admin_or_hr():
-    return current_user.role in ['ADMIN', 'HR', 'SUPER_ADMIN']
+    return g.user.role in ['ADMIN', 'HR', 'SUPER_ADMIN', 'MANAGER']
 
 UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads', 'policies')
 ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'txt'}
@@ -20,13 +20,13 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 @policies_bp.route('/categories', methods=['GET'])
-@login_required
+@token_required
 def get_categories():
     categories = PolicyCategory.query.all()
     return jsonify([c.to_dict() for c in categories])
 
 @policies_bp.route('/categories', methods=['POST'])
-@login_required
+@token_required
 def create_category():
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403
@@ -37,19 +37,19 @@ def create_category():
     return jsonify(category.to_dict()), 201
 
 @policies_bp.route('/', methods=['GET'])
-@login_required
+@token_required
 def get_policies():
     policies = Policy.query.all()
     return jsonify([p.to_dict() for p in policies])
 
 @policies_bp.route('/<int:id>', methods=['GET'])
-@login_required
+@token_required
 def get_policy(id):
     policy = Policy.query.get_or_404(id)
     return jsonify(policy.to_dict())
 
 @policies_bp.route('/', methods=['POST'])
-@login_required
+@token_required
 def create_policy():
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403
@@ -65,24 +65,24 @@ def create_policy():
     return jsonify(policy.to_dict()), 201
 
 @policies_bp.route('/<int:id>/acknowledge', methods=['POST'])
-@login_required
+@token_required
 def acknowledge_policy(id):
-    exists = PolicyAcknowledgment.query.filter_by(policy_id=id, user_id=current_user.id).first()
+    exists = PolicyAcknowledgment.query.filter_by(policy_id=id, user_id=g.user.id).first()
     if exists:
         return jsonify({'message': 'Already acknowledged'}), 200
     
-    ack = PolicyAcknowledgment(policy_id=id, user_id=current_user.id)
+    ack = PolicyAcknowledgment(policy_id=id, user_id=g.user.id)
     db.session.add(ack)
     db.session.commit()
     return jsonify({'message': 'Policy acknowledged'}), 201
 
 @policies_bp.route('/acknowledgments', methods=['GET'])
-@login_required
+@token_required
 def get_acknowledgments():
     if is_admin_or_hr():
         acks = PolicyAcknowledgment.query.all()
     else:
-        acks = PolicyAcknowledgment.query.filter_by(user_id=current_user.id).all()
+        acks = PolicyAcknowledgment.query.filter_by(user_id=g.user.id).all()
     
     results = [{
         'id': ack.id,
@@ -93,12 +93,12 @@ def get_acknowledgments():
     return jsonify(results)
 
 @policies_bp.route('/violations', methods=['GET'])
-@login_required
+@token_required
 def get_violations():
     if is_admin_or_hr():
         violations = PolicyViolation.query.all()
     else:
-        violations = PolicyViolation.query.filter_by(user_id=current_user.id).all()
+        violations = PolicyViolation.query.filter_by(user_id=g.user.id).all()
     
     results = [{
         'id': v.id,
@@ -110,29 +110,40 @@ def get_violations():
     return jsonify(results)
 
 @policies_bp.route('/violations', methods=['POST'])
-@login_required
+@token_required
 def report_violation():
     data = request.get_json(force=True)
     # Default to current user if offender not specified (self-report or test)
-    offender_id = data.get('user_id', current_user.id)
+    offender_id = data.get('user_id', g.user.id)
     
     violation = PolicyViolation(
         policy_id=data['policy_id'],
         user_id=offender_id,
-        reported_by_id=current_user.id,
+        reported_by_id=g.user.id,
         description=data['description']
     )
     db.session.add(violation)
     db.session.commit()
     return jsonify({'message': 'Violation reported', 'id': violation.id}), 201
 
+@policies_bp.route('/violations/<int:id>/approve', methods=['POST'])
+@token_required
+def approve_violation(id):
+    if not is_admin_or_hr():
+        return jsonify({'error': 'Unauthorized'}), 403
+    
+    violation = PolicyViolation.query.get_or_404(id)
+    violation.status = 'CLOSED'
+    db.session.commit()
+    return jsonify({'message': 'Violation approved/closed'})
+
 @policies_bp.route('/exceptions', methods=['POST'])
-@login_required
+@token_required
 def request_exception():
     data = request.get_json(force=True)
     ex = PolicyException(
         policy_id=data['policy_id'],
-        user_id=current_user.id,
+        user_id=g.user.id,
         reason=data['reason']
     )
     db.session.add(ex)
@@ -140,28 +151,28 @@ def request_exception():
     return jsonify({'message': 'Exception requested', 'id': ex.id}), 201
 
 @policies_bp.route('/exceptions/<int:id>/approve', methods=['POST'])
-@login_required
+@token_required
 def approve_exception(id):
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403
     ex = PolicyException.query.get_or_404(id)
     ex.status = 'APPROVED'
-    ex.approved_by_id = current_user.id
+    ex.approved_by_id = g.user.id
     ex.reviewed_at = datetime.utcnow()
     db.session.commit()
     return jsonify({'message': 'Exception approved'})
 
 @policies_bp.route('/dashboard', methods=['GET'])
-@login_required
+@token_required
 def dashboard():
     return jsonify({
         'total_policies': Policy.query.count(),
-        'my_acknowledgments': PolicyAcknowledgment.query.filter_by(user_id=current_user.id).count(),
-        'pending_violations': PolicyViolation.query.filter_by(user_id=current_user.id, status='OPEN').count()
+        'my_acknowledgments': PolicyAcknowledgment.query.filter_by(user_id=g.user.id).count(),
+        'pending_violations': PolicyViolation.query.filter_by(user_id=g.user.id, status='OPEN').count()
     })
 
 @policies_bp.route('/<int:id>/upload', methods=['POST'])
-@login_required
+@token_required
 def upload_document(id):
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403
@@ -184,7 +195,7 @@ def download_document(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
 @policies_bp.route('/compliance-report', methods=['GET'])
-@login_required
+@token_required
 def compliance_report():
     if not is_admin_or_hr():
         return jsonify({'error': 'Unauthorized'}), 403

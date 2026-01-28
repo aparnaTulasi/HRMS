@@ -58,23 +58,6 @@ def send_reset_otp(to_email: str, otp: str) -> bool:
 # --------------------------------
 # Login Credentials Email (Admin/HR/Employee)
 # --------------------------------
-def send_login_credentials(user_email: str, password: str, creator_web_host: str, created_by_role: str) -> bool:
-    subject = "Your HRMS Login Credentials"
-
-    body = (
-        "Hello,\n\n"
-        f"Your HRMS account has been successfully created by {created_by_role}.\n\n"
-        "Here are your login details:\n\n"
-        f"Web Address: {creator_web_host}\n"
-        f"Username: {user_email}\n"
-        f"Password: {password}\n\n"
-        "👉 Click here to login:\n"
-        f"https://{creator_web_host}\n\n"
-        "Regards,\n"
-        "HRMS Team\n"
-    )
-    return _send_plain_email(user_email, subject, body)
-
 def send_account_created_alert(personal_email: str, company_name: str, created_by: str) -> bool:
     subject = "Account Created Alert"
     body = (

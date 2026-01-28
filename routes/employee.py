@@ -17,14 +17,30 @@ def get_profile():
     emp = Employee.query.filter_by(user_id=g.user.id).first()
     if not emp:
         return jsonify({'message': 'Profile not found'}), 404
+    
+    addresses = []
+    for addr in emp.addresses:
+        addresses.append({
+            'type': addr.address_type,
+            'line': addr.address_line,
+            'city': addr.city,
+            'state': addr.state,
+            'pincode': addr.pincode,
+            'country': addr.country
+        })
+
     return jsonify({
         'id': emp.id,
+        'employee_id': emp.employee_id,
         'first_name': emp.first_name,
         'last_name': emp.last_name,
+        'email': emp.company_email,
+        'personal_email': emp.personal_email,
         'department': emp.department,
         'designation': emp.designation,
-        'phone': emp.work_phone,
-        'date_of_joining': emp.date_of_joining
+        'phone': getattr(emp, 'work_phone', None),
+        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None,
+        'addresses': addresses
     })
 
 # Other employee routes like /bank, /address etc. would go here

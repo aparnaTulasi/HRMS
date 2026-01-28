@@ -37,3 +37,29 @@ def approve_employee(user_id):
     user.status = 'ACTIVE'
     db.session.commit()
     return jsonify({'message': 'Employee approved successfully', 'status': 'ACTIVE'})
+
+@hr_bp.route('/team', methods=['GET'])
+@token_required
+@role_required(['HR', 'MANAGER', 'ADMIN'])
+def get_team():
+    query = Employee.query.filter_by(company_id=g.user.company_id)
+    
+    # If Manager, filter by department (assuming Manager manages their department)
+    if g.user.role == 'MANAGER':
+        manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
+        if manager_emp and manager_emp.department:
+            query = query.filter_by(department=manager_emp.department)
+            
+    employees = query.all()
+    output = []
+    for emp in employees:
+        user = User.query.get(emp.user_id)
+        output.append({
+            'id': emp.id,
+            'first_name': emp.first_name,
+            'last_name': emp.last_name,
+            'email': user.email if user else "",
+            'department': emp.department,
+            'designation': emp.designation
+        })
+    return jsonify(output)

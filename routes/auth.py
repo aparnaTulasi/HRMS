@@ -1,6 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app, session
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_jwt_extended import create_access_token
 from datetime import datetime, timedelta, timezone
 import jwt
 from zoneinfo import ZoneInfo
@@ -9,9 +8,9 @@ from models.super_admin import SuperAdmin
 from models.user import User
 from models.company import Company
 from models.employee import Employee
-from utils.email_utils import send_signup_otp, send_reset_otp, send_login_success_email
+from utils.email_utils import send_signup_otp, send_reset_otp, send_login_success_email, send_login_credentials
 from utils.notification_utils import send_security_alert_email
-from utils.url_generator import build_company_base_url
+from utils.url_generator import build_company_base_url, build_web_address, build_common_login_url
 
 auth_bp = Blueprint("auth", __name__)
 JWT_SECRET = "superadmin-secret-key"
@@ -144,7 +143,13 @@ def login():
         return jsonify({'message': 'User account is inactive'}), 403
 
     # Generate token
-    token = create_access_token(identity=user.id, additional_claims={'role': user.role})
+    token = jwt.encode({
+        'user_id': user.id,
+        'email': user.email,
+        'role': user.role,
+        'company_id': user.company_id,
+        'exp': datetime.utcnow() + timedelta(hours=24)
+    }, current_app.config['SECRET_KEY'], algorithm="HS256")
 
     # Get company and send login success email
     company = Company.query.get(user.company_id) if user.company_id else None
@@ -265,6 +270,27 @@ def reset_password():
 def register_company():
     try:
         data = request.get_json()
+
+        def _generate_employee_id(company_id):
+            """Generates a new unique employee ID like 'COMPCODE-0001'."""
+            company = Company.query.get(company_id)
+            prefix = company.company_code if company and company.company_code else "EMP"
+
+            # Find the last employee for this company to determine the next number
+            last_employee = Employee.query.filter(Employee.employee_id.like(f"{prefix}-%")).order_by(db.desc(Employee.id)).first()
+
+            if last_employee and last_employee.employee_id:
+                try:
+                    last_num = int(last_employee.employee_id.split('-')[-1])
+                    next_num = last_num + 1
+                except (ValueError, IndexError):
+                    # Fallback: count existing employees for that company
+                    next_num = Employee.query.filter_by(company_id=company_id).count() + 1
+            else:
+                # First employee
+                next_num = 1
+            return f"{prefix}-{next_num:04d}"
+        
         
         # Basic Validation
         required_fields = ["company_name", "subdomain", "email", "password", "first_name", "last_name"]
@@ -282,6 +308,7 @@ def register_company():
             return jsonify({"message": "Email already registered"}), 409
 
         # 1. Create Company
+
         new_company = Company(
             company_name=data["company_name"],
             subdomain=subdomain,
@@ -290,8 +317,8 @@ def register_company():
         )
         db.session.add(new_company)
         db.session.flush()
-
         # 2. Create Admin User
+
         hashed_password = generate_password_hash(data["password"])
         new_user = User(
             email=email,
@@ -307,16 +334,37 @@ def register_company():
         new_employee = Employee(
             user_id=new_user.id,
             company_id=new_company.id,
+            company_code=new_company.company_code,
+            employee_id=_generate_employee_id(new_company.id),
             first_name=data["first_name"],
             last_name=data["last_name"],
             designation="Company Admin",
             department="Management",
-            employee_id="ADMIN-01"
+            company_email=email,
+            personal_email=email
         )
         db.session.add(new_employee)
         db.session.commit()
 
-        return jsonify({"message": "Company registered successfully"}), 201
+        # Send login credentials email
+        raw_password = data["password"]
+        web_address = build_web_address(new_company.subdomain)
+        login_url = build_common_login_url(new_company.subdomain)
+        send_login_credentials(
+            personal_email=email,
+            company_email=email,
+            password=raw_password,
+            company_name=new_company.company_name,
+            web_address=web_address,
+            login_url=login_url,
+            created_by="System (Self-Registration)"
+        )
+
+        return jsonify({
+            "message": "Company registered successfully. Login credentials sent to your email.",
+            "company_id": new_company.id,
+            "admin_user_id": new_user.id
+        }), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({"message": "Registration failed", "error": str(e)}), 500
