@@ -22,10 +22,11 @@ def get_profile():
     for addr in emp.addresses:
         addresses.append({
             'type': addr.address_type,
-            'line': addr.address_line,
+            'line1': addr.address_line1,
+            'line2': addr.address_line2,
             'city': addr.city,
             'state': addr.state,
-            'pincode': addr.pincode,
+            'zip_code': addr.zip_code,
             'country': addr.country
         })
 
@@ -38,6 +39,7 @@ def get_profile():
         'personal_email': emp.personal_email,
         'department': emp.department,
         'designation': emp.designation,
+        'salary': emp.salary,
         'phone': getattr(emp, 'work_phone', None),
         'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None,
         'addresses': addresses

@@ -175,6 +175,7 @@ class Employee(db.Model):
     mother_name = db.Column(db.String(100))
     department = db.Column(db.String(50))
     designation = db.Column(db.String(50))
+    salary = db.Column(db.Float(10,2))
     date_of_joining = db.Column(db.Date)
     work_phone = db.Column(db.String(20))
     personal_mobile = db.Column(db.String(20))
@@ -297,23 +298,178 @@ class SystemURL(db.Model):
     company = db.relationship('Company', backref='urls')
 """
 
+models_payroll_py_content = """
+from datetime import datetime
+from models import db
+from sqlalchemy import CheckConstraint
+
+class SalaryComponent(db.Model):
+    __tablename__ = 'salary_components'
+    id = db.Column(db.Integer, primary_key=True) # component_id
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    
+    component_name = db.Column(db.String(100), nullable=False)
+    component_code = db.Column(db.String(20), nullable=False)
+    type = db.Column(db.String(20), nullable=False) # Earning/Deduction
+    calculation_type = db.Column(db.String(20), nullable=False) # Fixed/Percentage
+    percentage_value = db.Column(db.Float(5,2))
+    taxable = db.Column(db.String(5), default='Yes', nullable=False) # Yes/No
+    order_no = db.Column(db.Integer, nullable=False)
+    is_active = db.Column(db.String(5), default='Yes', nullable=False) # Yes/No
+
+    __table_args__ = (
+        db.UniqueConstraint('component_name', 'company_id', name='uq_component_name_company'),
+        db.UniqueConstraint('component_code', 'company_id', name='uq_component_code_company'),
+        CheckConstraint("type IN ('Earning', 'Deduction')", name='chk_comp_type'),
+        CheckConstraint("calculation_type IN ('Fixed', 'Percentage')", name='chk_calc_type'),
+        CheckConstraint("taxable IN ('Yes', 'No')", name='chk_taxable'),
+        CheckConstraint("is_active IN ('Yes', 'No')", name='chk_active_comp'),
+    )
+
+class SalaryStructure(db.Model):
+    __tablename__ = 'salary_structures'
+    id = db.Column(db.Integer, primary_key=True) # structure_id
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    
+    structure_name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(300))
+    base_salary = db.Column(db.Float(10,2))
+    is_active = db.Column(db.String(5), default='Yes', nullable=False)
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('structure_name', 'company_id', name='uq_structure_name_company'),
+        CheckConstraint("is_active IN ('Yes', 'No')", name='chk_active_struct'),
+    )
+    
+    components = db.relationship('SalaryStructureComponent', backref='structure', lazy=True)
+
+class SalaryStructureComponent(db.Model):
+    __tablename__ = 'salary_structure_components'
+    id = db.Column(db.Integer, primary_key=True)
+    structure_id = db.Column(db.Integer, db.ForeignKey('salary_structures.id'), nullable=False)
+    component_id = db.Column(db.Integer, db.ForeignKey('salary_components.id'), nullable=False)
+    
+    percentage = db.Column(db.Float(5,2))
+    fixed_amount = db.Column(db.Float(10,2))
+    depends_on_component_id = db.Column(db.Integer, db.ForeignKey('salary_components.id'), nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('structure_id', 'component_id', name='uq_ssc'),
+    )
+    
+    component = db.relationship('SalaryComponent', foreign_keys=[component_id])
+    depends_on = db.relationship('SalaryComponent', foreign_keys=[depends_on_component_id])
+
+class EmployeeSalaryStructure(db.Model):
+    __tablename__ = 'employee_salary_structure'
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    structure_id = db.Column(db.Integer, db.ForeignKey('salary_structures.id'), nullable=False)
+    
+    effective_from = db.Column(db.Date, nullable=False)
+    effective_to = db.Column(db.Date)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'effective_from', name='uq_ess'),
+    )
+
+class PayrollRun(db.Model):
+    __tablename__ = 'payroll_run'
+    id = db.Column(db.Integer, primary_key=True) # payroll_id
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    month_year = db.Column(db.String(20), nullable=False)
+    run_date = db.Column(db.Date, default=datetime.utcnow)
+    status = db.Column(db.String(20), default='In Progress', nullable=False) # In Progress, Completed, Locked
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    remarks = db.Column(db.String(300))
+
+    __table_args__ = (
+        db.UniqueConstraint('month_year', 'company_id', name='uq_pr_month_company'),
+        CheckConstraint("status IN ('In Progress', 'Completed', 'Locked')", name='chk_payroll_status'),
+    )
+
+class PayrollRunEmployee(db.Model):
+    __tablename__ = 'payroll_run_employees'
+    id = db.Column(db.Integer, primary_key=True)
+    payroll_id = db.Column(db.Integer, db.ForeignKey('payroll_run.id'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    paid_days = db.Column(db.Float(5,2))
+    lop_days = db.Column(db.Float(5,2))
+    overtime_hours = db.Column(db.Float(5,2))
+    overtime_amount = db.Column(db.Float(10,2))
+
+    __table_args__ = (
+        db.UniqueConstraint('payroll_id', 'employee_id', name='uq_pre'),
+    )
+
+class PayrollEarning(db.Model):
+    __tablename__ = 'payroll_earnings'
+    id = db.Column(db.Integer, primary_key=True) # earning_id
+    payroll_id = db.Column(db.Integer, db.ForeignKey('payroll_run.id'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    component_id = db.Column(db.Integer, db.ForeignKey('salary_components.id'), nullable=False)
+    amount = db.Column(db.Float(10,2), nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint('payroll_id', 'employee_id', 'component_id', name='uq_pe'),
+    )
+
+class PayrollDeduction(db.Model):
+    __tablename__ = 'payroll_deductions'
+    id = db.Column(db.Integer, primary_key=True) # deduction_id
+    payroll_id = db.Column(db.Integer, db.ForeignKey('payroll_run.id'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    component_id = db.Column(db.Integer, db.ForeignKey('salary_components.id'), nullable=False)
+    amount = db.Column(db.Float(10,2), nullable=False)
+    is_manual = db.Column(db.String(5), default='No') # Yes/No
+
+    __table_args__ = (
+        db.UniqueConstraint('payroll_id', 'employee_id', 'component_id', name='uq_pd'),
+        CheckConstraint("is_manual IN ('Yes', 'No')", name='chk_is_manual'),
+    )
+
+class PayrollSummary(db.Model):
+    __tablename__ = 'payroll_summary'
+    id = db.Column(db.Integer, primary_key=True) # summary_id
+    payroll_id = db.Column(db.Integer, db.ForeignKey('payroll_run.id'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    gross_salary = db.Column(db.Float(12,2))
+    total_deductions = db.Column(db.Float(12,2))
+    net_salary = db.Column(db.Float(12,2))
+    employer_contribution = db.Column(db.Float(12,2))
+
+    __table_args__ = (
+        db.UniqueConstraint('payroll_id', 'employee_id', name='uq_ps'),
+    )
+"""
+
 models_employee_address_py_content = """
 from models import db
+from datetime import datetime
 
 class EmployeeAddress(db.Model):
     __tablename__ = 'employee_address'
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
     address_type = db.Column(db.String(20)) # PRESENT / PERMANENT
-    address_line = db.Column(db.String(255))
+    address_line1 = db.Column(db.String(150))
+    address_line2 = db.Column(db.String(150))
     city = db.Column(db.String(100))
     state = db.Column(db.String(100))
-    pincode = db.Column(db.String(20))
+    zip_code = db.Column(db.String(10))
     country = db.Column(db.String(100))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 """
 
 models_employee_bank_py_content = """
 from models import db
+from datetime import datetime
 
 class EmployeeBankDetails(db.Model):
     __tablename__ = 'employee_bank_details'
@@ -321,8 +477,10 @@ class EmployeeBankDetails(db.Model):
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), unique=True, nullable=False)
     bank_name = db.Column(db.String(100), nullable=False)
     branch_name= db.Column(db.String(100),nullable=False)
-    account_number = db.Column(db.String(50), nullable=False)
+    account_number = db.Column(db.String(20), unique=True, nullable=False)
     ifsc_code = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 """
 
 models_employee_documents_py_content = """
@@ -505,14 +663,32 @@ def get_profile():
     emp = Employee.query.filter_by(user_id=g.user.id).first()
     if not emp:
         return jsonify({'message': 'Profile not found'}), 404
+    
+    addresses = []
+    for addr in emp.addresses:
+        addresses.append({
+            'type': addr.address_type,
+            'line1': addr.address_line1,
+            'line2': addr.address_line2,
+            'city': addr.city,
+            'state': addr.state,
+            'zip_code': addr.zip_code,
+            'country': addr.country
+        })
+
     return jsonify({
         'id': emp.id,
+        'employee_id': emp.employee_id,
         'first_name': emp.first_name,
         'last_name': emp.last_name,
+        'email': emp.company_email,
+        'personal_email': emp.personal_email,
         'department': emp.department,
         'designation': emp.designation,
+        'salary': emp.salary,
         'phone': getattr(emp, 'work_phone', None),
-        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None
+        'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None,
+        'addresses': addresses
     })
 
 # Other employee routes like /bank, /address etc. would go here
@@ -614,19 +790,22 @@ from models import db
 class LeaveType(db.Model):
     __tablename__ = 'leave_types'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'))
-    leaves = db.relationship('Leave', backref='leave_type', lazy=True)
+    name = db.Column(db.String(100), nullable=False) # CL/SL/PL/WFH
+    rules_json = db.Column(db.Text) # JSON string for rules
+    leaves = db.relationship('LeaveRequest', backref='leave_type', lazy=True)
 
-class Leave(db.Model):
-    __tablename__ = 'leaves'
+class LeaveRequest(db.Model):
+    __tablename__ = 'leave_requests'
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
     leave_type_id = db.Column(db.Integer, db.ForeignKey('leave_types.id'), nullable=False)
-    start_date = db.Column(db.Date, nullable=False)
-    end_date = db.Column(db.Date, nullable=False)
+    from_date = db.Column(db.Date, nullable=False)
+    to_date = db.Column(db.Date, nullable=False)
     reason = db.Column(db.Text)
-    status = db.Column(db.String(50), default='pending')
+    status = db.Column(db.String(50), default='Pending') # Pending/Approved/Rejected
+    approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     employee = db.relationship('Employee', foreign_keys=[employee_id])
 
@@ -635,19 +814,18 @@ class LeaveBalance(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
     leave_type_id = db.Column(db.Integer, db.ForeignKey('leave_types.id'), nullable=False)
-    year = db.Column(db.Integer, nullable=False)
-    total_allotted = db.Column(db.Integer, default=0)
-    used = db.Column(db.Integer, default=0)
-    __table_args__ = (db.UniqueConstraint('employee_id', 'leave_type_id', 'year'),)
+    balance = db.Column(db.Float, default=0.0)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
     employee = db.relationship('Employee', backref='leave_balances')
     leave_type = db.relationship('LeaveType', backref='balances')
 """
 
 leave_routes_py_content = """
-from flask import request, jsonify
+from flask import request, jsonify, g
 from utils.decorators import token_required, role_required
 from . import leave_bp
-from .models import Leave
+from .models import LeaveRequest
 from models import db
 from models.employee import Employee
 from datetime import datetime
@@ -660,11 +838,12 @@ def apply_leave():
     if not emp:
         return jsonify({'message': 'Employee profile not found'}), 404
 
-    new_leave = Leave(
+    new_leave = LeaveRequest(
         employee_id=emp.id,
+        company_id=emp.company_id,
         leave_type_id=data['leave_type_id'],
-        start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
-        end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date(),
+        from_date=datetime.strptime(data['from_date'], '%Y-%m-%d').date(),
+        to_date=datetime.strptime(data['to_date'], '%Y-%m-%d').date(),
         reason=data['reason']
     )
     db.session.add(new_leave)
@@ -675,17 +854,13 @@ def apply_leave():
 @token_required
 @role_required(['HR', 'MANAGER', 'ADMIN'])
 def approve_leave(id):
-    leave = Leave.query.get_or_404(id)
+    leave = LeaveRequest.query.get_or_404(id)
     
     approver_emp = Employee.query.filter_by(user_id=g.user.id).first()
-    if not approver_emp:
-        return jsonify({'message': 'Approver profile not found'}), 404
-
-    if leave.employee_id == approver_emp.id:
-        return jsonify({'message': 'Cannot approve your own leave'}), 403
-        
+    
     data = request.get_json()
-    leave.status = data.get('status', 'APPROVED')
+    leave.status = data.get('status', 'Approved')
+    leave.approved_by = approver_emp.id if approver_emp else None
     db.session.commit()
     return jsonify({'message': f'Leave {leave.status.lower()}'})
 """
@@ -791,6 +966,7 @@ def organize_project():
         "models/department.py": models_department_py_content,
         "models/filter.py": models_filter_py_content,
         "models/urls.py": models_urls_py_content,
+        "models/payroll.py": models_payroll_py_content,
         "models/employee_address.py": models_employee_address_py_content,
         "models/employee_bank.py": models_employee_bank_py_content,
         "models/employee_documents.py": models_employee_documents_py_content,

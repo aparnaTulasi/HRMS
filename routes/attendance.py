@@ -13,14 +13,14 @@ def mark_in_time():
     emp = Employee.query.filter_by(user_id=g.user.id).first()
     if not emp: return jsonify({'message': 'Employee not found'}), 404
     today = date.today()
-    existing = Attendance.query.filter_by(employee_id=emp.id, date=today).first()
-    if existing and existing.in_time: return jsonify({'message': 'Already marked in for today'}), 400
+    existing = Attendance.query.filter(Attendance.employee_id==emp.id, db.func.date(Attendance.punch_in_time)==today).first()
+    if existing and existing.punch_in_time: return jsonify({'message': 'Already marked in for today'}), 400
     
     if existing:
-        existing.in_time = datetime.utcnow()
-        existing.status = 'PRESENT'
+        existing.punch_in_time = datetime.utcnow()
+        existing.status = 'Present'
     else:
-        attendance = Attendance(employee_id=emp.id, date=today, in_time=datetime.utcnow(), status='PRESENT')
+        attendance = Attendance(employee_id=emp.id, company_id=emp.company_id, date=today, punch_in_time=datetime.utcnow(), status='Present', capture_method='Web')
         db.session.add(attendance)
     db.session.commit()
     return jsonify({'message': 'In time marked successfully'})
@@ -31,15 +31,15 @@ def mark_out_time():
     emp = Employee.query.filter_by(user_id=g.user.id).first()
     if not emp: return jsonify({'message': 'Employee not found'}), 404
     today = date.today()
-    attendance = Attendance.query.filter_by(employee_id=emp.id, date=today).first()
+    attendance = Attendance.query.filter(Attendance.employee_id==emp.id, db.func.date(Attendance.punch_in_time)==today).first()
     
-    if not attendance or not attendance.in_time:
+    if not attendance or not attendance.punch_in_time:
         return jsonify({'message': 'You have not marked in today'}), 400
     
-    attendance.out_time = datetime.utcnow()
+    attendance.punch_out_time = datetime.utcnow()
     # Calculate work hours (simple difference)
-    duration = attendance.out_time - attendance.in_time
-    attendance.work_hours = round(duration.total_seconds() / 3600, 2)
+    duration = attendance.punch_out_time - attendance.punch_in_time
+    attendance.total_hours = round(duration.total_seconds() / 3600, 2)
     
     db.session.commit()
     return jsonify({'message': 'Out time marked successfully'})
@@ -56,16 +56,17 @@ def correct_attendance():
         return jsonify({'message': 'Missing employee_id or date'}), 400
         
     attendance_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-    attendance = Attendance.query.filter_by(employee_id=employee_id, date=attendance_date).first()
+    # Note: Logic slightly adjusted as 'date' column might be deprecated in favor of timestamp checks, but keeping simple for now
+    attendance = Attendance.query.filter_by(employee_id=employee_id, date=attendance_date).first() 
     
     if not attendance:
-        attendance = Attendance(employee_id=employee_id, date=attendance_date)
+        attendance = Attendance(employee_id=employee_id, date=attendance_date, company_id=g.user.company_id)
         db.session.add(attendance)
     
-    if 'in_time' in data:
-        attendance.in_time = datetime.strptime(data['in_time'], '%Y-%m-%d %H:%M:%S')
-    if 'out_time' in data:
-        attendance.out_time = datetime.strptime(data['out_time'], '%Y-%m-%d %H:%M:%S')
+    if 'login_time' in data:
+        attendance.punch_in_time = datetime.strptime(data['login_time'], '%Y-%m-%d %H:%M:%S')
+    if 'logout_time' in data:
+        attendance.punch_out_time = datetime.strptime(data['logout_time'], '%Y-%m-%d %H:%M:%S')
     
     attendance.status = data.get('status', attendance.status)
     attendance.remarks = data.get('remarks', attendance.remarks)
