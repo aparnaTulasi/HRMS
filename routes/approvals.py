@@ -27,10 +27,11 @@ def create_approval_request():
     # Create Request
     new_req = ApprovalRequest(
         request_type=data['request_type'],
-        resource_id=data['resource_id'],
-        requester_id=g.user.id,
+        reference_id=data['resource_id'],
+        requested_by=g.user.employee_profile.id if g.user.employee_profile else None,
+        company_id=g.user.company_id,
         status='PENDING',
-        current_step_order=1
+        current_step=1
     )
     db.session.add(new_req)
     db.session.flush() # Get ID
@@ -38,11 +39,11 @@ def create_approval_request():
     # Create Steps
     for step_data in data.get('steps', []):
         step = ApprovalStep(
-            request_id=new_req.id,
+            approval_request_id=new_req.id,
             step_name=step_data['name'],
             step_order=step_data['order'],
-            role_required=step_data.get('role'),
-            specific_user_id=step_data.get('user_id')
+            approver_role=step_data.get('role'),
+            approver_id=step_data.get('user_id') # Expecting employee_id here
         )
         db.session.add(step)
         
@@ -54,20 +55,25 @@ def create_approval_request():
 def get_pending_approvals():
     """Get requests waiting for current user's action"""
     # Get all pending steps
-    pending_steps = ApprovalStep.query.filter_by(status='PENDING').all()
+    pending_steps = db.session.query(ApprovalStep).join(
+        ApprovalRequest, ApprovalStep.approval_request_id == ApprovalRequest.id
+    ).filter(
+        ApprovalStep.status == 'PENDING',
+        ApprovalRequest.status == 'PENDING',
+        ApprovalRequest.current_step == ApprovalStep.step_order
+    ).all()
     
     my_pending = []
+    current_emp_id = g.user.employee_profile.id if g.user.employee_profile else None
+
     for step in pending_steps:
-        # Check if this step belongs to the active request step order
-        req = ApprovalRequest.query.get(step.request_id)
-        if req.status != 'PENDING' or req.current_step_order != step.step_order:
-            continue
-            
+        req = step.approval_request
+        
         # Check permissions
         authorized = False
-        if step.specific_user_id and step.specific_user_id == g.user.id:
+        if step.approver_id and step.approver_id == current_emp_id:
             authorized = True
-        elif step.role_required and step.role_required == g.user.role:
+        elif step.approver_role and step.approver_role == g.user.role:
             authorized = True
         # Note: For MANAGER role, you might want to add logic to check if user is manager of requester
             
@@ -75,7 +81,7 @@ def get_pending_approvals():
             my_pending.append({
                 'request_id': req.id,
                 'type': req.request_type,
-                'resource_id': req.resource_id,
+                'reference_id': req.reference_id,
                 'step_name': step.step_name,
                 'created_at': req.created_at
             })
@@ -100,18 +106,20 @@ def approval_action(req_id):
         
     # Find current step
     current_step = ApprovalStep.query.filter_by(
-        request_id=req.id, 
-        step_order=req.current_step_order
+        approval_request_id=req.id, 
+        step_order=req.current_step
     ).first()
     
     if not current_step:
         return jsonify({'message': 'Configuration error: No step found'}), 500
         
     # Authorization Check
+    current_emp_id = g.user.employee_profile.id if g.user.employee_profile else None
     authorized = False
-    if current_step.specific_user_id == g.user.id:
+    
+    if current_step.approver_id == current_emp_id:
         authorized = True
-    elif current_step.role_required == g.user.role:
+    elif current_step.approver_role == g.user.role:
         authorized = True
         
     if not authorized:
@@ -129,21 +137,23 @@ def approval_action(req_id):
     
     if action_type == 'APPROVE':
         current_step.status = 'APPROVED'
+        current_step.action_at = datetime.utcnow()
         
         # Check if there is a next step
         next_step = ApprovalStep.query.filter_by(
-            request_id=req.id, 
-            step_order=req.current_step_order + 1
+            approval_request_id=req.id, 
+            step_order=req.current_step + 1
         ).first()
         
         if next_step:
-            req.current_step_order += 1
+            req.current_step += 1
         else:
             req.status = 'APPROVED'
             # TODO: Trigger callback to update actual resource (Leave/Expense) status
             
     elif action_type == 'REJECT':
         current_step.status = 'REJECTED'
+        current_step.action_at = datetime.utcnow()
         req.status = 'REJECTED'
         
     db.session.commit()
@@ -155,7 +165,8 @@ def approval_history(req_id):
     req = ApprovalRequest.query.get_or_404(req_id)
     
     # Allow requester or admins/approvers to view
-    if req.requester_id != g.user.id and g.user.role not in ['ADMIN', 'HR', 'MANAGER']:
+    current_emp_id = g.user.employee_profile.id if g.user.employee_profile else None
+    if req.requested_by != current_emp_id and g.user.role not in ['ADMIN', 'HR', 'MANAGER']:
         return jsonify({'message': 'Unauthorized'}), 403
         
     history = []
@@ -170,6 +181,6 @@ def approval_history(req_id):
         
     return jsonify({
         'request_status': req.status,
-        'current_step': req.current_step_order,
+        'current_step': req.current_step,
         'history': history
     })
