@@ -40,6 +40,21 @@ app.config.from_object(Config)
 CORS(app)
 db.init_app(app)
 
+# Register Models (Ensure they are loaded for SQLAlchemy)
+import models.user
+import models.company
+import models.employee
+import models.permission
+import models.attendance
+import models.department
+import models.filter
+import models.urls
+import models.payroll
+import models.employee_address
+import models.employee_bank
+import models.employee_documents
+import leave.models
+
 # Import blueprints
 from routes.auth import auth_bp
 from routes.admin import admin_bp
@@ -79,17 +94,28 @@ if __name__ == '__main__':
 
 config_py_content = """
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 class Config:
-    SECRET_KEY = "hrms-secret-key-change-this"
+    SECRET_KEY = os.getenv("SECRET_KEY", "hrms-secret-key-change-this")
     SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(INSTANCE_DIR, 'hrms.db')}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
     BASE_URL = "http://localhost:5000"
+
+    # Email Configuration
+    MAIL_SERVER = "smtp.gmail.com"
+    MAIL_USE_TLS = True
+    MAIL_USERNAME = os.getenv("MAIL_USERNAME")
+    MAIL_PASSWORD = os.getenv("MAIL_PASSWORD")
+    MAIL_PORT = 587
+    MAIL_DEFAULT_SENDER = os.getenv("MAIL_DEFAULT_SENDER")
 
 os.makedirs(Config.UPLOAD_FOLDER, exist_ok=True)
 """
@@ -116,14 +142,12 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     employee_profile = db.relationship('Employee', backref='user', uselist=False, lazy=True)
-    permissions = db.relationship('UserPermission', backref='user', lazy=True)
+    permissions = db.relationship('UserPermission', foreign_keys='UserPermission.user_id', backref=db.backref('user', foreign_keys='UserPermission.user_id'), lazy=True)
 
     def generate_otp(self):
-        if self.role == 'EMPLOYEE':
-            self.otp = ''.join(secrets.choice('0123456789') for _ in range(6))
-            self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
-            return self.otp
-        return None
+        self.otp = ''.join(secrets.choice('0123456789') for _ in range(6))
+        self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
+        return self.otp
 
     def has_permission(self, permission_code):
         if self.role == 'SUPER_ADMIN':
@@ -164,11 +188,11 @@ class Employee(db.Model):
     __tablename__ = 'employees'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), unique=True, nullable=False)
-    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=True)
     company_code = db.Column(db.String(20))
     employee_id = db.Column(db.String(50), unique=True)
     first_name = db.Column(db.String(50), nullable=False)
-        last_name = db.Column(db.String(50), nullable=False)
+    last_name = db.Column(db.String(50), nullable=False)
     gender = db.Column(db.String(10))
     date_of_birth = db.Column(db.Date)
     father_or_husband_name = db.Column(db.String(100))
@@ -526,6 +550,8 @@ from models.user import User
 from models.company import Company
 from models.employee import Employee
 from config import Config
+from utils.email_utils import send_login_success_email, send_signup_otp
+from utils.url_generator import build_company_base_url
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -544,7 +570,11 @@ def register():
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
-    user = User.query.filter_by(email=data['email']).first()
+    email = data.get('email') or data.get('company_email')
+    if not email:
+        return jsonify({'message': 'Email is required'}), 400
+
+    user = User.query.filter_by(email=email).first()
     if not user or not check_password_hash(user.password, data['password']):
         return jsonify({'message': 'Invalid credentials'}), 401
 
@@ -552,13 +582,87 @@ def login():
         'user_id': user.id, 'email': user.email, 'role': user.role,
         'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
     }, Config.SECRET_KEY, algorithm="HS256")
-    return jsonify({'token': token})
+    
+    try:
+        send_login_success_email(user.email)
+    except:
+        pass
+
+    # Determine Redirect URL
+    ROLE_PATHS = {
+        "SUPER_ADMIN": "/super/dashboard",
+        "ADMIN": "/admin/dashboard",
+        "HR": "/hr/dashboard",
+        "EMPLOYEE": "/employee/dashboard",
+    }
+    
+    company = Company.query.get(user.company_id) if user.company_id else None
+    subdomain = company.subdomain if company else ""
+    base_url = build_company_base_url(subdomain)
+    path = ROLE_PATHS.get(user.role, "/")
+    
+    return jsonify({
+        'token': token,
+        'role': user.role,
+        'redirect_url': f"{base_url}{path}"
+    })
+
+@auth_bp.route('/super-admin/signup', methods=['POST'])
+def super_admin_signup():
+    data = request.get_json()
+    if User.query.filter_by(email=data['email']).first():
+        return jsonify({'message': 'User already exists'}), 409
+
+    hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
+    new_user = User(email=data['email'], password=hashed_password, role='SUPER_ADMIN', status='PENDING_OTP')
+    
+    # Generate OTP
+    otp = new_user.generate_otp()
+    
+    send_signup_otp(data['email'], otp)
+    db.session.add(new_user)
+    db.session.flush()
+
+    new_employee = Employee(
+        user_id=new_user.id,
+        first_name=data.get('first_name'),
+        last_name=data.get('last_name'),
+        employee_id=f"SA-{new_user.id}"
+    )
+    db.session.add(new_employee)
+    db.session.commit()
+
+    return jsonify({'message': 'Super Admin registered successfully. Please check your email for OTP.'}), 201
+
+@auth_bp.route('/verify-signup-otp', methods=['POST'])
+def verify_signup_otp():
+    data = request.get_json()
+    user = User.query.filter_by(email=data.get('email')).first()
+    
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+    if user.otp != data.get('otp'):
+        return jsonify({'message': 'Invalid OTP'}), 400
+    if user.otp_expiry and user.otp_expiry < datetime.datetime.utcnow():
+        return jsonify({'message': 'OTP expired'}), 400
+        
+    user.status = 'ACTIVE'
+    user.otp = None
+    user.otp_expiry = None
+    db.session.commit()
+    return jsonify({'message': 'Account verified successfully'}), 200
 """
 
 routes_admin_py_content = """
-from flask import Blueprint, jsonify, g
+from flask import Blueprint, jsonify, request, g
+from werkzeug.security import generate_password_hash
+from models import db
+from models.user import User
+from models.company import Company
 from utils.decorators import token_required, role_required
 from models.employee import Employee
+from utils.email_utils import send_account_created_alert, send_login_credentials
+from utils.url_generator import build_web_address, build_common_login_url
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -568,16 +672,87 @@ admin_bp = Blueprint('admin', __name__)
 def get_employees():
     employees = Employee.query.filter_by(company_id=g.user.company_id).all()
     return jsonify([{'id': emp.id, 'name': emp.full_name} for emp in employees])
+
+@admin_bp.route('/create-employee', methods=['POST'])
+@token_required
+@role_required(['ADMIN', 'HR'])
+def create_employee():
+    data = request.get_json()
+    required = ['email', 'first_name', 'last_name', 'password', 'personal_email']
+    if not all(k in data for k in required):
+        return jsonify({'message': 'Missing required fields'}), 400
+        
+    company_id = g.user.company_id
+    email = data['email'].lower().strip()
+    personal_email = data['personal_email'].lower().strip()
+    
+    if User.query.filter_by(email=email).first():
+        return jsonify({'message': 'Email already exists'}), 409
+        
+    hashed_password = generate_password_hash(data['password'])
+    new_user = User(
+        email=email,
+        password=hashed_password,
+        role=data.get('role', 'EMPLOYEE'),
+        company_id=company_id,
+        is_active=True
+    )
+    db.session.add(new_user)
+    db.session.flush()
+    
+    company = Company.query.get(company_id)
+    emp_count = Employee.query.filter_by(company_id=company_id).count()
+    emp_code = f"{company.company_code}-{emp_count + 1:04d}"
+    
+    new_employee = Employee(
+        user_id=new_user.id,
+        company_id=company_id,
+        company_code=company.company_code,
+        employee_id=emp_code,
+        first_name=data['first_name'],
+        last_name=data['last_name'],
+        company_email=email,
+        personal_email=personal_email,
+        department=data.get('department'),
+        designation=data.get('designation'),
+        date_of_joining=data.get('date_of_joining')
+    )
+    db.session.add(new_employee)
+    db.session.commit()
+    
+    # Send Emails
+    creator_name = g.user.employee_profile.full_name if g.user.employee_profile else "Admin"
+    web_address = build_web_address(company.subdomain)
+    login_url = build_common_login_url(company.subdomain)
+    
+    # Mail 1: Alert
+    send_account_created_alert(personal_email, company.company_name, creator_name)
+    
+    # Mail 2: Credentials
+    send_login_credentials(
+        personal_email=personal_email,
+        company_email=email,
+        password=data['password'],
+        company_name=company.company_name,
+        web_address=web_address,
+        login_url=login_url,
+        created_by=creator_name
+    )
+    
+    return jsonify({'message': 'Employee created successfully'}), 201
 """
 
 routes_superadmin_py_content = """
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash
+from datetime import datetime
 from models import db
 from models.company import Company
 from models.user import User
 from models.employee import Employee
 from utils.decorators import token_required, role_required
+from utils.email_utils import send_account_created_alert, send_login_credentials
+from utils.url_generator import build_web_address, build_common_login_url
 
 superadmin_bp = Blueprint('superadmin', __name__)
 
@@ -599,6 +774,70 @@ def create_company():
     db.session.add(admin_emp)
     db.session.commit()
     return jsonify({'message': 'Company and Admin created'}), 201
+
+@superadmin_bp.route('/create-admin', methods=['POST'])
+@token_required
+@role_required(['SUPER_ADMIN'])
+def create_admin():
+    data = request.get_json()
+    
+    required_fields = ['company_id', 'company_email', 'password', 'first_name', 'last_name']
+    if not all(k in data for k in required_fields):
+        return jsonify({'message': 'Missing required fields'}), 400
+
+    company = Company.query.get(data['company_id'])
+    if not company:
+        return jsonify({'message': 'Company not found'}), 404
+
+    if User.query.filter_by(email=data['company_email']).first():
+        return jsonify({'message': 'Email already exists'}), 409
+
+    hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
+    new_user = User(
+        email=data['company_email'],
+        password=hashed_password,
+        role='ADMIN',
+        company_id=company.id,
+        status='ACTIVE'
+    )
+    db.session.add(new_user)
+    db.session.flush()
+    
+    emp_count = Employee.query.filter_by(company_id=company.id).count()
+    emp_code = f"{company.company_code}-ADMIN-{emp_count + 1:02d}" if company.company_code else f"ADMIN-{emp_count + 1:02d}"
+
+    new_employee = Employee(
+        user_id=new_user.id,
+        company_id=company.id,
+        company_code=company.company_code,
+        employee_id=emp_code,
+        first_name=data['first_name'],
+        last_name=data['last_name'],
+        company_email=data['company_email'],
+        personal_email=data.get('personal_email'),
+        department=data.get('department', 'Administration'),
+        designation=data.get('designation', 'Company Admin'),
+        date_of_joining=datetime.utcnow().date()
+    )
+    db.session.add(new_employee)
+    db.session.commit()
+
+    if data.get('personal_email'):
+        web_address = build_web_address(company.subdomain)
+        login_url = build_common_login_url(company.subdomain)
+        
+        send_account_created_alert(data['personal_email'], company.company_name, "Super Admin")
+        send_login_credentials(
+            personal_email=data['personal_email'],
+            company_email=data['company_email'],
+            password=data['password'],
+            company_name=company.company_name,
+            web_address=web_address,
+            login_url=login_url,
+            created_by="Super Admin"
+        )
+
+    return jsonify({'message': 'Company Admin created successfully'}), 201
 """
 
 routes_hr_py_content = """
@@ -914,21 +1153,159 @@ def permission_required(permission_code):
 """
 
 utils_url_generator_py_content = """
-import re
+from flask import current_app
 
-def clean_username(email):
-    if not email or '@' not in email:
-        return "user"
-    username = email.split('@')[0].lower()
-    return re.sub(r'[^a-zA-Z0-9]', '', username)
+def clean_domain(s: str) -> str:
+    if not s:
+        return ""
+    return s.replace("http://", "").replace("https://", "").strip().strip("/")
 
-def generate_login_url(email, role, company=None):
-    username = clean_username(email)
-    if role == 'SUPER_ADMIN':
-        return f"https://{username}.superadmin.hrms.com"
-    if company:
-        return f"https://{company.subdomain}.hrms.com/{username}"
-    return f"https://hrms.com/{username}"
+ROOT_DOMAIN = "company.com"
+
+def build_web_address(subdomain: str) -> str:
+    sub = clean_domain(subdomain)
+    if not sub:
+        return "localhost:5173"
+    return f"{sub}.{ROOT_DOMAIN}"
+
+def build_common_login_url(subdomain: str) -> str:
+    sub = clean_domain(subdomain)
+    if not sub:
+        return "http://localhost:5173/login"
+    return f"https://{sub}.{ROOT_DOMAIN}/login"
+
+def build_company_base_url(subdomain: str) -> str:
+    sub = (subdomain or "").strip().lower()
+    if not sub:
+        return current_app.config.get("FRONTEND_LOCAL", "http://localhost:5173")
+
+    protocol = current_app.config.get("FRONTEND_PROTOCOL", "https")
+    base_domain = current_app.config.get("FRONTEND_BASE_DOMAIN", "company.com")
+    return f"{protocol}://{sub}.{base_domain}"
+"""
+
+utils_email_utils_py_content = """
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from flask import current_app
+from datetime import datetime
+
+def _send_plain_email(to_email: str, subject: str, body: str) -> bool:
+    smtp_server = current_app.config.get("MAIL_SERVER", "smtp.gmail.com")
+    smtp_port = int(current_app.config.get("MAIL_PORT", 587))
+    smtp_user = current_app.config.get("MAIL_USERNAME")
+    smtp_pass = current_app.config.get("MAIL_PASSWORD")
+    sender = current_app.config.get("MAIL_DEFAULT_SENDER", smtp_user)
+
+    if not smtp_user or not smtp_pass:
+        print(f"❌ Mail credentials missing. Mock sending to {to_email}")
+        return False
+
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = f"HRMS Team <{sender}>"
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain"))
+
+        server = smtplib.SMTP(smtp_server, smtp_port, timeout=50)
+        server.ehlo()
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+
+        print(f"✅ Email sent to {to_email}")
+        return True
+    except Exception as e:
+        print(f"❌ Email error: {e}")
+        return False
+
+def send_signup_otp(to_email: str, otp: str) -> bool:
+    subject = "Super Admin Signup OTP"
+    body = f"Your signup OTP is: {otp}\\n\\nValid for 10 minutes."
+    return _send_plain_email(to_email, subject, body)
+
+def send_account_created_alert(personal_email: str, company_name: str, created_by: str) -> bool:
+    subject = "Account Created Alert"
+    body = (
+        "Hello,\\n\\n"
+        f"An account was created for you in {company_name} by {created_by}.\\n"
+        f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\\n"
+        f"Regards,\\n"
+        f"{company_name}\\n"
+    )
+    return _send_plain_email(personal_email, subject, body)
+
+def send_login_credentials(personal_email: str, company_email: str, password: str,
+                           company_name: str, web_address: str, login_url: str, created_by: str) -> bool:
+    subject = "Login Details"
+    body = (
+        "Hello,\\n\\n"
+        f"Your account has been created by {created_by}.\\n\\n"
+        "Login Details:\\n"
+        f"Web Address: {web_address}\\n"
+        f"Username: {company_email}\\n"
+        f"Password: {password}\\n\\n"
+        "👉 Click here to login:\\n"
+        f"{login_url}\\n\\n"
+        f"Regards,\\n"
+        f"{company_name}\\n"
+    )
+    return _send_plain_email(personal_email, subject, body)
+
+def send_login_success_email(to_email: str) -> bool:
+    subject = "Login Successful"
+    body = (
+        "Hello,\\n\\n"
+        "Login successful.\\n"
+        f"Date & Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\n\\n"
+        f"Regards,\\n"
+        "Company Team\\n"
+    )
+    return _send_plain_email(to_email, subject, body)
+"""
+
+rebuild_db_py_content = """
+from app import app
+from models import db
+
+if __name__ == "__main__":
+    with app.app_context():
+        print("🗑️  Dropping all tables...")
+        db.drop_all()
+        print("🔨 Creating all tables...")
+        db.create_all()
+        print("✅ Database rebuilt successfully!")
+"""
+
+clear_super_admin_py_content = """
+from app import app
+from models import db
+from models.user import User
+from models.employee import Employee
+
+if __name__ == "__main__":
+    with app.app_context():
+        print("🧹 Clearing Super Admin data...")
+        try:
+            super_admins = User.query.filter_by(role='SUPER_ADMIN').all()
+            for user in super_admins:
+                Employee.query.filter_by(user_id=user.id).delete()
+                db.session.delete(user)
+            db.session.commit()
+            print(f"✅ Cleared {len(super_admins)} Super Admin(s).")
+        except Exception as e:
+            db.session.rollback()
+            print(f"❌ Error: {e}")
+"""
+
+env_content = """
+SECRET_KEY=hrms-secret-key-change-this
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-app-password
+MAIL_DEFAULT_SENDER=your-email@gmail.com
 """
 
 # ==============================================================================
@@ -976,11 +1353,18 @@ def organize_project():
         "utils/__init__.py": "",
         "utils/decorators.py": utils_decorators_py_content,
         "utils/url_generator.py": utils_url_generator_py_content,
+        "utils/email_utils.py": utils_email_utils_py_content,
+        "rebuild_db.py": rebuild_db_py_content,
+        "clear_super_admin.py": clear_super_admin_py_content,
+        ".env": env_content,
     }
 
     # 2. Create/update all the correct files
     print("\n--- Writing correct files ---")
     for path, content in project_files.items():
+        if path == ".env" and os.path.exists(path):
+            print(f"⚠️  Skipping .env (already exists)")
+            continue
         create_file(path, content)
 
     # 3. Move all other root-level .py scripts to a 'scripts' directory
@@ -990,7 +1374,7 @@ def organize_project():
         os.makedirs(scripts_dir)
     
     root_py_files = [f for f in os.listdir('.') if os.path.isfile(f) and f.endswith('.py')]
-    core_app_files = ['app.py', 'config.py', 'organize_project.py']
+    core_app_files = ['app.py', 'config.py', 'organize_project.py', 'rebuild_db.py', 'clear_super_admin.py']
 
     for script in root_py_files:
         if script not in core_app_files:

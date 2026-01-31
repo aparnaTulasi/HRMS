@@ -1,5 +1,5 @@
-from datetime import datetime
 from models import db
+from datetime import datetime
 
 class EmployeeAddress(db.Model):
     __tablename__ = 'employee_address'

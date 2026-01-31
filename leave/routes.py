@@ -18,8 +18,8 @@ def apply_leave():
         employee_id=emp.id,
         company_id=emp.company_id,
         leave_type_id=data['leave_type_id'],
-        start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
-        end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date(),
+        from_date=datetime.strptime(data['from_date'], '%Y-%m-%d').date(),
+        to_date=datetime.strptime(data['to_date'], '%Y-%m-%d').date(),
         reason=data['reason']
     )
     db.session.add(new_leave)

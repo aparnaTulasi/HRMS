@@ -1,280 +1,86 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, jsonify, request, g
 from werkzeug.security import generate_password_hash
-from sqlalchemy.exc import IntegrityError
-from datetime import datetime
-
 from models import db
 from models.user import User
-from models.employee import Employee
 from models.company import Company
 from utils.decorators import token_required, role_required
-from utils.url_generator import build_common_login_url, build_web_address
+from models.employee import Employee
 from utils.email_utils import send_account_created_alert, send_login_credentials
+from utils.url_generator import build_web_address, build_common_login_url
 
-admin_bp = Blueprint("admin", __name__)
-
-def _parse_date(date_str):
-    """Parse date string in YYYY-MM-DD format"""
-    from datetime import datetime
-    return datetime.strptime(date_str, "%Y-%m-%d").date()
-
-def _generate_employee_id(company_id):
-    """Generates a new unique employee ID like 'COMPCODE-0001'."""
-    company = Company.query.get(company_id)
-    prefix = company.company_code if company and company.company_code else "EMP"
-
-    # Find the last employee for this company to determine the next number
-    last_employee = Employee.query.filter(Employee.employee_id.like(f"{prefix}-%")).order_by(db.desc(Employee.id)).first()
-
-    if last_employee and last_employee.employee_id:
-        try:
-            last_num = int(last_employee.employee_id.split('-')[-1])
-            next_num = last_num + 1
-        except (ValueError, IndexError):
-            # Fallback: count existing employees for that company
-            next_num = Employee.query.filter_by(company_id=company_id).count() + 1
-    else:
-        # First employee
-        next_num = 1
-    return f"{prefix}-{next_num:04d}"
-
-
-@admin_bp.route("/hr", methods=["POST"])
-@token_required
-@role_required(["ADMIN"])
-def create_hr():
-    data = request.get_json(force=True)
-
-    personal_email = (data.get("personal_email") or "").strip().lower()
-    company_email  = (data.get("company_email") or "").strip().lower()
-    password       = (data.get("password") or "").strip()
-
-    first_name = data.get("first_name", "HR")
-    last_name  = data.get("last_name", "User")
-    department = data.get("department", "Human Resources")
-    designation= data.get("designation", "HR")
-
-    if not personal_email or not company_email or not password:
-        return jsonify({"message": "personal_email, company_email, password are required"}), 400
-
-    if User.query.filter_by(email=company_email).first():
-        return jsonify({"message": "Company email already exists"}), 409
-
-    company = g.user.company if hasattr(g.user, "company") else Company.query.get(g.user.company_id)
-    if not company:
-        return jsonify({"message": "Company not found"}), 404
-
-    try:
-        hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
-
-        new_user = User(
-            email=company_email,
-            password=hashed_password,
-            role="HR",
-            company_id=company.id,
-            is_active=True
-        )
-        db.session.add(new_user)
-        db.session.flush()
-
-        new_emp = Employee(
-            user_id=new_user.id,
-            company_id=company.id,
-            company_code=company.company_code,
-            employee_id=_generate_employee_id(company.id),
-            first_name=first_name,
-            last_name=last_name,
-            department=department,
-            designation=designation,
-            date_of_joining=datetime.utcnow().date(),
-            personal_email=personal_email,
-            company_email=company_email
-        )
-        db.session.add(new_emp)
-        db.session.commit()
-
-        web_address = build_web_address(company.subdomain)
-        login_url   = build_common_login_url(company.subdomain)
-        created_by = "Admin"
-
-        alert_sent = send_account_created_alert(personal_email, company.company_name, created_by)
-
-        creds_sent = send_login_credentials(
-            personal_email=personal_email,
-            company_email=company_email,
-            password=password,
-            company_name=company.company_name,
-            web_address=web_address,
-            login_url=login_url,
-            created_by=created_by
-        )
-
-        return jsonify({
-            "message": "HR created successfully",
-            "employee_id": new_emp.employee_id,
-            "company_email": company_email,
-            "personal_email": personal_email,
-            "alert_sent": alert_sent,
-            "credentials_sent": creds_sent
-        }), 201
-
-    except IntegrityError as e:
-        db.session.rollback()
-        return jsonify({"message": "DB integrity error", "error": str(e)}), 400
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "Server error", "error": str(e)}), 500
+admin_bp = Blueprint('admin', __name__)
 
 @admin_bp.route('/employees', methods=['GET'])
 @token_required
 @role_required(['ADMIN', 'HR'])
 def get_employees():
     employees = Employee.query.filter_by(company_id=g.user.company_id).all()
-    return jsonify([{
-        'id': emp.id,
-        'user_id': emp.user_id,
-        'name': f"{emp.first_name} {emp.last_name}",
-        'designation': emp.designation
-    } for emp in employees])
+    return jsonify([{'id': emp.id, 'name': emp.full_name} for emp in employees])
 
-@admin_bp.route('/employees', methods=['POST'])
+@admin_bp.route('/create-employee', methods=['POST'])
 @token_required
-@role_required(["ADMIN", "HR"])
+@role_required(['ADMIN', 'HR'])
 def create_employee():
-    req_data = request.get_json(force=True)
-    is_bulk = isinstance(req_data, list)
-    data_list = req_data if is_bulk else [req_data]
-
-    results = []
-    company = g.user.company if hasattr(g.user, "company") else Company.query.get(g.user.company_id)
-
-    for data in data_list:
-        try:
-            company_email = (data.get("company_email") or "").strip().lower()
-            personal_email = (data.get("personal_email") or "").strip().lower()
-            password = (data.get("password") or "").strip()
-
-            if not company_email or not password or not personal_email:
-                results.append(({"email": company_email, "message": "company_email, personal_email, and password are required"}, 400))
-                continue
-
-            if User.query.filter_by(email=company_email).first():
-                results.append(({"email": company_email, "message": "User with this company email already exists"}, 409))
-                continue
-
-            role = (data.get("role") or "EMPLOYEE").strip().upper()
-            if role in ["SUPER_ADMIN", "ADMIN"]:
-                results.append(({"email": company_email, "message": f"Cannot create role: {role}"}, 403))
-                continue
-
-            hashed_password = generate_password_hash(password)
-
-            new_user = User(
-                email=company_email,
-                password=hashed_password,
-                role=role,
-                company_id=g.user.company_id,
-                is_active=True
-            )
-            db.session.add(new_user)
-            db.session.flush()
-
-            doj = None
-            if data.get("date_of_joining"):
-                try:
-                    doj = _parse_date(data.get("date_of_joining"))
-                except ValueError:
-                    db.session.rollback()
-                    results.append(({"email": company_email, "message": "Invalid date format. Use YYYY-MM-DD"}, 400))
-                    continue
-
-            new_emp = Employee(
-                user_id=new_user.id,
-                company_id=g.user.company_id,
-                company_code=company.company_code,
-                employee_id=_generate_employee_id(g.user.company_id),
-                first_name=data.get("first_name", "Employee"),
-                last_name=data.get("last_name", "User"),
-                department=data.get("department"),
-                designation=data.get("designation", role),
-                date_of_joining=doj,
-                company_email=company_email,
-                personal_email=personal_email
-            )
-            db.session.add(new_emp)
-            db.session.commit()
-
-            web_address = build_web_address(company.subdomain)
-            login_url = build_common_login_url(company.subdomain)
-            created_by = g.user.role.replace("_", " ").title()
-            
-
-            email_sent = send_login_credentials(
-                personal_email=personal_email,
-                company_email=company_email,
-                password=password,
-                company_name=company.company_name,
-                web_address=web_address,
-                login_url=login_url,
-                created_by=created_by
-            )
-
-            results.append(({
-                "employee_id": new_emp.employee_id,
-                "company_email": company_email,
-                "message": f"{role} created",
-                "email_sent_to": personal_email,
-                "email_sent_status": email_sent
-            }, 201))
-
-        except IntegrityError as e:
-            db.session.rollback()
-            results.append(({"email": data.get("company_email"), "message": "DB integrity error", "error": str(e)}, 400))
-
-        except Exception as e:
-            db.session.rollback()
-            results.append(({"email": data.get("company_email"), "message": "Server error", "error": str(e)}, 500))
-
-    if not is_bulk:
-        return jsonify(results[0][0]), results[0][1]
-
-    return jsonify([r[0] for r in results]), 207
-
-@admin_bp.route('/users/<int:user_id>', methods=['PUT'])
-@token_required
-@role_required(['ADMIN'])
-def update_user(user_id):
-    user = User.query.get(user_id)
-    if not user or user.company_id != g.user.company_id:
-        return jsonify({'message': 'User not found or unauthorized'}), 404
+    data = request.get_json()
+    required = ['email', 'first_name', 'last_name', 'password', 'personal_email']
+    if not all(k in data for k in required):
+        return jsonify({'message': 'Missing required fields'}), 400
         
-    data = request.get_json(force=True)
+    company_id = g.user.company_id
+    email = data['email'].lower().strip()
+    personal_email = data['personal_email'].lower().strip()
     
-    if 'is_active' in data:
-        user.is_active = data['is_active']
-    
-    emp = Employee.query.filter_by(user_id=user.id).first()
-    if emp:
-        if 'first_name' in data: emp.first_name = data['first_name']
-        if 'last_name' in data: emp.last_name = data['last_name']
-        if 'department' in data: emp.department = data['department']
-        if 'designation' in data: emp.designation = data['designation']
+    if User.query.filter_by(email=email).first():
+        return jsonify({'message': 'Email already exists'}), 409
         
-    db.session.commit()
-    return jsonify({'message': 'User updated successfully'})
-
-@admin_bp.route('/users/<int:user_id>', methods=['DELETE'])
-@token_required
-@role_required(['ADMIN'])
-def delete_user(user_id):
-    user = User.query.get(user_id)
-    if not user or user.company_id != g.user.company_id:
-        return jsonify({'message': 'User not found or unauthorized'}), 404
+    hashed_password = generate_password_hash(data['password'])
+    new_user = User(
+        email=email,
+        password=hashed_password,
+        role=data.get('role', 'EMPLOYEE'),
+        company_id=company_id,
+        is_active=True
+    )
+    db.session.add(new_user)
+    db.session.flush()
     
-    if user.id == g.user.id:
-        return jsonify({'message': 'Cannot delete yourself'}), 400
-
-    Employee.query.filter_by(user_id=user.id).delete()
-    db.session.delete(user)
+    company = Company.query.get(company_id)
+    emp_count = Employee.query.filter_by(company_id=company_id).count()
+    emp_code = f"{company.company_code}-{emp_count + 1:04d}"
+    
+    new_employee = Employee(
+        user_id=new_user.id,
+        company_id=company_id,
+        company_code=company.company_code,
+        employee_id=emp_code,
+        first_name=data['first_name'],
+        last_name=data['last_name'],
+        company_email=email,
+        personal_email=personal_email,
+        department=data.get('department'),
+        designation=data.get('designation'),
+        date_of_joining=data.get('date_of_joining')
+    )
+    db.session.add(new_employee)
     db.session.commit()
-    return jsonify({'message': 'User deleted successfully'})
+    
+    # Send Emails
+    creator_name = g.user.employee_profile.full_name if g.user.employee_profile else "Admin"
+    web_address = build_web_address(company.subdomain)
+    login_url = build_common_login_url(company.subdomain)
+    
+    # Mail 1: Alert
+    send_account_created_alert(personal_email, company.company_name, creator_name)
+    
+    # Mail 2: Credentials
+    send_login_credentials(
+        personal_email=personal_email,
+        company_email=email,
+        password=data['password'],
+        company_name=company.company_name,
+        web_address=web_address,
+        login_url=login_url,
+        created_by=creator_name
+    )
+    
+    return jsonify({'message': 'Employee created successfully'}), 201

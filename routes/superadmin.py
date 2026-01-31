@@ -1,269 +1,156 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash
-import secrets
-import string
 from datetime import datetime
-from sqlalchemy.exc import IntegrityError
-
 from models import db
 from models.company import Company
 from models.user import User
 from models.employee import Employee
 from utils.decorators import token_required, role_required
-from utils.email_utils import send_login_credentials, send_account_created_alert
-from utils.url_generator import clean_domain, build_web_address, build_common_login_url
+from utils.email_utils import send_account_created_alert, send_login_credentials
+from utils.url_generator import build_web_address, build_common_login_url
 
-superadmin_bp = Blueprint("superadmin", __name__)
+superadmin_bp = Blueprint('superadmin', __name__)
 
-# ---------------------------
-# Helpers
-# ---------------------------
-def generate_company_code(name: str) -> str:
-    clean = ''.join(ch for ch in (name or "") if ch.isalnum())
-    prefix = (clean[:2] or "CO").upper()
-    suffix = ''.join(secrets.choice(string.digits) for _ in range(2))
-    return f"{prefix}{suffix}"
-
-def _generate_employee_id(company_id):
-    """Generates a new unique employee ID like 'COMPCODE-0001'."""
-    company = Company.query.get(company_id)
-    prefix = company.company_code if company and company.company_code else "EMP"
-
-    # Find the last employee for this company to determine the next number
-    last_employee = Employee.query.filter(Employee.employee_id.like(f"{prefix}-%")).order_by(db.desc(Employee.id)).first()
-
-    if last_employee and last_employee.employee_id:
-        try:
-            last_num = int(last_employee.employee_id.split('-')[-1])
-            next_num = last_num + 1
-        except (ValueError, IndexError):
-            # Fallback: count existing employees for that company
-            next_num = Employee.query.filter_by(company_id=company_id).count() + 1
-    else:
-        # First employee
-        next_num = 1
-    return f"{prefix}-{next_num:04d}"
-
-
-# ======================================================
-# ✅ 1) CREATE COMPANY (ONLY company, NO admin)
-# POST /api/superadmin/create-company
-# ======================================================
-@superadmin_bp.route("/create-company", methods=["POST"])
+# =========================================================
+# 1) CREATE COMPANY (ONLY company) - YOUR REQUIRED FLOW ✅
+# =========================================================
+@superadmin_bp.route('/create-company', methods=['POST'])
 @token_required
-@role_required(["SUPER_ADMIN"])
+@role_required(['SUPER_ADMIN'])
 def create_company():
-    data = request.get_json(force=True)
+    data = request.get_json() or {}
 
-    required = ["company_name", "subdomain", "company_size", "industry", "state", "country", "city_branch"]
-    missing = [k for k in required if not data.get(k)]
+    # Required company fields
+    required_fields = ['company_name', 'subdomain']
+    missing = [k for k in required_fields if not data.get(k)]
     if missing:
-        return jsonify({"message": f"Missing fields: {', '.join(missing)}"}), 400
+        return jsonify({'message': f"Missing required fields: {missing}"}), 400
 
-    subdomain = clean_domain(data["subdomain"])
-    company_code = data.get("company_code") or generate_company_code(data["company_name"])
+    # Prevent duplicate subdomain (recommended)
+    if Company.query.filter_by(subdomain=data['subdomain']).first():
+        return jsonify({'message': 'Subdomain already exists'}), 409
 
-    # Check for duplicates
-    if Company.query.filter_by(subdomain=subdomain).first():
-        return jsonify({"message": "Subdomain already exists"}), 409
-    if Company.query.filter_by(company_code=company_code).first():
-        return jsonify({"message": "Company code already exists"}), 409
+    new_company = Company(
+        company_name=data['company_name'],
+        subdomain=data['subdomain']
+    )
 
-    try:
-        new_company = Company(
-            company_name=data["company_name"],
-            subdomain=subdomain,
-            company_code=company_code,
+    # Optional fields (only set if Company model has those attributes)
+    optional_fields = [
+        'company_code', 'industry', 'company_size',
+        'state', 'country', 'city_branch', 'timezone'
+    ]
+    for field in optional_fields:
+        if field in data and hasattr(Company, field):
+            setattr(new_company, field, data.get(field))
 
-            company_size=data.get("company_size"),
-            industry=data.get("industry"),
-            state=data.get("state"),
-            country=data.get("country"),
-            city_branch=data.get("city_branch"),
-            timezone=data.get("timezone", "UTC"),
-        )
+    db.session.add(new_company)
+    db.session.commit()
 
-        db.session.add(new_company)
-        db.session.commit()
-
-        return jsonify({
-            "message": "Company created successfully",
-            "company_id": new_company.id,
-            "company_code": new_company.company_code
-        }), 201
-
-    except IntegrityError as e:
-        db.session.rollback()
-        return jsonify({"message": "Duplicate company_code or subdomain", "error": str(e)}), 409
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "Error creating company", "error": str(e)}), 500
+    return jsonify({
+        'message': 'Company created successfully',
+        'company_id': new_company.id
+    }), 201
 
 
-# ======================================================
-# ✅ 2) CREATE ADMIN (AFTER company create)
-# POST /api/superadmin/create-admin
-# ======================================================
-@superadmin_bp.route("/create-admin", methods=["POST"])
+# =========================================================
+# 2) CREATE ADMIN (AFTER company exists) ✅
+# =========================================================
+@superadmin_bp.route('/create-admin', methods=['POST'])
 @token_required
-@role_required(["SUPER_ADMIN"])
+@role_required(['SUPER_ADMIN'])
 def create_admin():
-    data = request.get_json(force=True)
+    data = request.get_json() or {}
 
-    if not data.get("company_id") or not data.get("company_email") or not data.get("password") or not data.get("personal_email"):
-        return jsonify({"message": "company_id, company_email, personal_email, and password are required"}), 400
+    required_fields = ['company_id', 'company_email', 'password', 'first_name', 'last_name']
+    missing = [k for k in required_fields if not data.get(k)]
+    if missing:
+        return jsonify({'message': f"Missing required fields: {missing}"}), 400
 
-    company = Company.query.get(data["company_id"])
+    company = Company.query.get(data['company_id'])
     if not company:
-        return jsonify({"message": "Company not found"}), 404
+        return jsonify({'message': 'Company not found'}), 404
 
-    company_email = data["company_email"].strip().lower()
-    personal_email = data["personal_email"].strip().lower()
+    company_email = data['company_email'].strip().lower()
 
     if User.query.filter_by(email=company_email).first():
-        return jsonify({"message": "User with this company email already exists"}), 409
+        return jsonify({'message': 'Email already exists'}), 409
 
-    try:
-        raw_password = data["password"]
-        hashed_password = generate_password_hash(raw_password)
+    hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
+    new_user = User(
+        email=company_email,
+        password=hashed_password,
+        role='ADMIN',
+        company_id=company.id,
+        status='ACTIVE'
+    )
+    db.session.add(new_user)
+    db.session.flush()
 
-        new_admin = User(
-            email=company_email,
-            password=hashed_password,
-            role="ADMIN",
-            company_id=company.id,
-            is_active=True
-        )
-        db.session.add(new_admin)
+    # Employee code generation
+    emp_count = Employee.query.filter_by(company_id=company.id).count()
+    emp_code = f"{company.company_code}-ADMIN-{emp_count + 1:02d}" if getattr(company, "company_code", None) else f"ADMIN-{emp_count + 1:02d}"
 
-        db.session.flush()
+    new_employee = Employee(
+        user_id=new_user.id,
+        company_id=company.id,
+        company_code=getattr(company, "company_code", None),
+        employee_id=emp_code,
+        first_name=data['first_name'],
+        last_name=data['last_name'],
+        company_email=company_email,
+        personal_email=data.get('personal_email'),
+        department=data.get('department', 'Administration'),
+        designation=data.get('designation', 'Company Admin'),
+        date_of_joining=datetime.utcnow().date()
+    )
+    db.session.add(new_employee)
+    db.session.commit()
 
-        admin_emp = Employee(
-            user_id=new_admin.id,
-            company_id=company.id,
-            company_code=company.company_code,
-            employee_id=_generate_employee_id(company.id),
-            first_name=data.get("first_name", "Admin"),
-            last_name=data.get("last_name", "User"),
-            department=data.get("department", "Management"),
-            designation=data.get("designation", "Admin"),
-            date_of_joining=datetime.utcnow(),
-            personal_email=personal_email,
-            company_email=company_email
-        )
-        db.session.add(admin_emp)
-        db.session.commit()
-
+    # Send mails (only if personal_email is provided)
+    if data.get('personal_email'):
         web_address = build_web_address(company.subdomain)
         login_url = build_common_login_url(company.subdomain)
-        created_by = "Super Admin"
 
-        # Mail 1: Account Created
-        send_account_created_alert(personal_email, company.company_name, created_by)
-
-        # Mail 2: Login Credentials
-        email_sent = send_login_credentials(
-            personal_email=personal_email,
+        send_account_created_alert(data['personal_email'], company.company_name, "Super Admin")
+        send_login_credentials(
+            personal_email=data['personal_email'],
             company_email=company_email,
-            password=raw_password,
-            company_name=company.company_name,
-            web_address=web_address,
-            login_url=login_url,
-            created_by=created_by
-        )
-
-        return jsonify({
-            "message": "Admin created successfully",
-            "employee_id": admin_emp.employee_id,
-            "company_email": company_email,
-            "personal_email": personal_email,
-            "email_sent": email_sent
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "Error creating admin", "error": str(e)}), 500
-
-
-# ======================================================
-# ✅ 3) CREATE USERS (MANAGER/HR/EMPLOYEE)
-# POST /api/superadmin/users
-# ======================================================
-@superadmin_bp.route("/users", methods=["POST"])
-@token_required
-@role_required(["SUPER_ADMIN"])
-def create_user():
-    data = request.get_json(force=True)
-
-    if not data.get("company_id") or not data.get("company_email") or not data.get("personal_email") or not data.get("role"):
-        return jsonify({"message": "company_id, company_email, personal_email, and role are required"}), 400
-
-    company = Company.query.get(data["company_id"])
-    if not company:
-        return jsonify({"message": "Company not found"}), 404
-
-    company_email = data["company_email"].strip().lower()
-    personal_email = data["personal_email"].strip().lower()
-    if User.query.filter_by(email=company_email).first():
-        return jsonify({"message": "User with this company email already exists"}), 409
-
-    role = data["role"].strip().upper()
-
-    try:
-        # Auto-generate password if not provided
-        if 'password' in data and data['password']:
-            raw_password = data['password']
-        else:
-            raw_password = secrets.token_urlsafe(12)
-        hashed_password = generate_password_hash(raw_password)
-
-        new_user = User(
-            email=company_email,
-            password=hashed_password,
-            role=role,
-            company_id=company.id,
-            is_active=True
-        )
-        db.session.add(new_user)
-        db.session.flush()
-
-        emp = Employee(
-            user_id=new_user.id,
-            company_id=company.id,
-            company_code=company.company_code,
-            employee_id=_generate_employee_id(company.id),
-            first_name=data.get("first_name", role.title()),
-            last_name=data.get("last_name", "User"),
-            department=data.get("department"),
-            designation=data.get("designation", role),
-            date_of_joining=datetime.utcnow(),
-            personal_email=personal_email,
-            company_email=company_email
-        )
-        db.session.add(emp)
-        db.session.commit()
-
-        web_address = build_web_address(company.subdomain)
-        login_url = build_common_login_url(company.subdomain)
-        
-        email_sent = send_login_credentials(
-            personal_email=personal_email,
-            company_email=company_email,
-            password=raw_password,
+            password=data['password'],
             company_name=company.company_name,
             web_address=web_address,
             login_url=login_url,
             created_by="Super Admin"
         )
 
-        return jsonify({
-            "message": f"{role} created successfully",
-            "employee_id": emp.employee_id,
-            "company_email": company_email,
-            "personal_email": personal_email,
-            "email_sent": email_sent
-        }), 201
+    return jsonify({
+        'message': 'Company Admin created successfully',
+        'company_id': company.id,
+        'admin_user_id': new_user.id,
+        'employee_id': emp_code
+    }), 201
 
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "Error creating user", "error": str(e)}), 500
+
+# =========================================================
+# 3) GET ALL SUPER ADMINS ✅
+# =========================================================
+@superadmin_bp.route('/all', methods=['GET'])
+@token_required
+@role_required(['SUPER_ADMIN'])
+def get_all_superadmins():
+    superadmins = User.query.filter_by(role='SUPER_ADMIN').all()
+
+    result = []
+    for user in superadmins:
+        result.append({
+            "id": user.id,
+            "email": user.email,
+            "role": user.role,
+            "company_id": user.company_id,
+            "created_at": user.created_at.isoformat() if getattr(user, 'created_at', None) else None
+        })
+
+    return jsonify({
+        "count": len(result),
+        "super_admins": result
+    }), 200
