@@ -27,5 +27,5 @@ class ShiftAssignment(db.Model):
     shift = db.relationship('Shift', backref='assignments')
 
     __table_args__ = (
-        db.UniqueConstraint('employee_id', 'shift_id', 'start_date', name='uq_employee_shift'),
+        db.UniqueConstraint('company_id', 'employee_id', 'start_date', name='uq_company_employee_shift_start'),
     )

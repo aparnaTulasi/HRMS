@@ -73,36 +73,56 @@ def get_pending_employees():
 @token_required
 @role_required(['ADMIN'])
 def create_hr():
-    data = request.get_json()
-    
-    if User.query.filter_by(email=data['email']).first():
-        return jsonify({'message': 'Email already exists'}), 400
-        
-    hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
-    
+    data = request.get_json() or {}
+
+    # Accept both naming styles safely
+    company_email = (data.get("company_email") or data.get("email") or "").strip().lower()
+    personal_email = (data.get("personal_email") or "").strip().lower()
+    password = data.get("password")
+    first_name = data.get("first_name")
+    last_name = data.get("last_name")
+
+    if not company_email or not password or not first_name or not last_name:
+        return jsonify({"message": "company_email, password, first_name, last_name are required"}), 400
+
+    # Duplicate email check (User table)
+    if User.query.filter_by(email=company_email).first():
+        return jsonify({"message": "Email already exists"}), 409
+
+    hashed_password = generate_password_hash(password, method="pbkdf2:sha256")
+
+    # Create HR User
     new_hr = User(
-        email=data['email'],
+        email=company_email,
         password=hashed_password,
-        role='HR',
+        role="HR",
         company_id=g.user.company_id,
-        status='ACTIVE',
-        portal_prefix=g.user.portal_prefix # Inherit prefix from creating admin
+        status="ACTIVE",
+        portal_prefix=g.user.portal_prefix
     )
     db.session.add(new_hr)
-    db.session.commit()
-    
+    db.session.flush()  # get new_hr.id without committing yet
+
+    # Create Employee profile for HR
     new_emp = Employee(
         user_id=new_hr.id,
         company_id=g.user.company_id,
-        first_name=data.get('first_name'),
-        last_name=data.get('last_name'),
-        department='HR',
-        designation='HR Manager'
+        first_name=first_name,
+        last_name=last_name,
+        department=data.get("department", "Human Resources"),
+        designation=data.get("designation", "HR Manager"),
+        company_email=company_email,              # ✅ saved
+        personal_email=personal_email or None     # ✅ saved
     )
+
     db.session.add(new_emp)
     db.session.commit()
-    
-    return jsonify({'message': 'HR created successfully'}), 201
+
+    # Optional: print log in terminal
+    print(f"✅ HR created: {company_email} | personal_email: {personal_email} | company_id: {g.user.company_id}")
+
+    return jsonify({"message": "HR created successfully"}), 201
+
 
 @admin_bp.route('/employee/<int:emp_id>', methods=['GET'])
 @token_required

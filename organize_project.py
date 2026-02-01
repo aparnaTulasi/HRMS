@@ -29,10 +29,17 @@ def delete_path(path):
 # ==============================================================================
 
 app_py_content = """
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from config import Config
 from models import db
+import logging
+
+# Force-enable Werkzeug logging
+logging.basicConfig(level=logging.INFO)
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.setLevel(logging.INFO)
+werkzeug_logger.disabled = False
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -80,6 +87,10 @@ app.register_blueprint(urls_bp, url_prefix='/api/urls')
 app.register_blueprint(permissions_bp, url_prefix='/api/permissions')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')
 app.register_blueprint(leave_bp)
+
+@app.before_request
+def log_request():
+    print(f"➡️ {request.method} {request.path}", flush=True)
 
 @app.route('/')
 def home():
@@ -223,25 +234,53 @@ class Employee(db.Model):
 """
 
 models_attendance_py_content = """
-from datetime import datetime
+ from datetime import datetime, date
 from models import db
 
 class Attendance(db.Model):
-    __tablename__ = 'attendance'
-    id = db.Column(db.Integer, primary_key=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
-    date = db.Column(db.Date, nullable=False, default=datetime.utcnow().date)
-    in_time = db.Column(db.DateTime)
-    out_time = db.Column(db.DateTime)
-    status = db.Column(db.String(20), default='ABSENT')
-    work_hours = db.Column(db.Float, default=0.0)
-    year = db.Column(db.Integer, default=datetime.utcnow().year)
-    month = db.Column(db.Integer, default=datetime.utcnow().month)
-    marked_by = db.Column(db.String(20))
-    remarks = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    __table_args__ = (db.UniqueConstraint('employee_id', 'date', name='unique_attendance'),)
+    """
+    One row per employee per date (UPSERT key)
+    """
+    __tablename__ = "attendance_logs"
+
+    attendance_id = db.Column(db.Integer, primary_key=True)
+
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id"), nullable=False, index=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False, index=True)
+
+    # Main unique key for UPSERT
+    attendance_date = db.Column(db.Date, nullable=False, index=True)
+
+    # Times (optional for Absent)
+    punch_in_time = db.Column(db.DateTime, nullable=True)
+    punch_out_time = db.Column(db.DateTime, nullable=True)
+
+    # Stored to show "Logged Time"
+    total_minutes = db.Column(db.Integer, default=0, nullable=False)
+
+    # Present / Absent / Leave / Half Day etc. (keep it flexible)
+    status = db.Column(db.String(20), default="Present", nullable=False)
+
+    # manual/import/web/biometric (you said no self punch, still keep for audit)
+    capture_method = db.Column(db.String(50), default="Manual", nullable=False)  # Manual / Import
+
+    # Audit
+    created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("company_id", "employee_id", "attendance_date", name="uq_att_company_emp_date"),
+    )
+
+    def recalc_total_minutes(self):
+        if self.punch_in_time and self.punch_out_time and self.punch_out_time > self.punch_in_time:
+            diff = self.punch_out_time - self.punch_in_time
+            self.total_minutes = int(diff.total_seconds() // 60)
+        else:
+            self.total_minutes = 0
 """
 
 models_permission_py_content = """
@@ -673,17 +712,79 @@ def get_employees():
     employees = Employee.query.filter_by(company_id=g.user.company_id).all()
     return jsonify([{'id': emp.id, 'name': emp.full_name} for emp in employees])
 
+@admin_bp.route('/create-hr', methods=['POST'])
+@token_required
+@role_required(['ADMIN'])
+def create_hr():
+    print("🔵 Create HR Request Received...", flush=True)
+    data = request.get_json(force=True)
+    email = data.get('email') or data.get('company_email')
+    personal_email = data.get('personal_email')
+    if not email or not data.get('password'):
+        return jsonify({'message': 'Email and Password are required'}), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'message': 'Email already exists'}), 409
+
+    hashed_password = generate_password_hash(data['password'])
+    new_user = User(email=email, password=hashed_password, role='HR', company_id=g.user.company_id)
+    db.session.add(new_user)
+    db.session.flush()
+
+    new_employee = Employee(
+        user_id=new_user.id,
+        company_id=g.user.company_id,
+        first_name=data.get('first_name'),
+        last_name=data.get('last_name'),
+        company_email=email,
+        personal_email=personal_email,
+        department=data.get('department', 'Human Resources'),
+        designation=data.get('designation', 'HR Manager')
+    )
+    db.session.add(new_employee)
+    db.session.commit()
+
+    # --- Terminal Logging & Email Sending ---
+    print(f"✅ HR Created: {email} | Personal Email: {personal_email}", flush=True)
+
+    if personal_email:
+        try:
+            company = Company.query.get(g.user.company_id)
+            creator_name = g.user.employee_profile.full_name if g.user.employee_profile else "Admin"
+            web_address = build_web_address(company.subdomain)
+            login_url = build_common_login_url(company.subdomain)
+            
+            send_account_created_alert(personal_email, company.company_name, creator_name)
+            send_login_credentials(
+                personal_email=personal_email,
+                company_email=email,
+                password=data['password'],
+                company_name=company.company_name,
+                web_address=web_address,
+                login_url=login_url,
+                created_by=creator_name
+            )
+            print(f"📧 Credentials sent to {personal_email}", flush=True)
+        except Exception as e:
+            print(f"❌ Failed to send email: {e}", flush=True)
+
+    return jsonify({'message': 'HR created successfully'}), 201
+
+@admin_bp.route('/employees', methods=['POST'])
 @admin_bp.route('/create-employee', methods=['POST'])
 @token_required
 @role_required(['ADMIN', 'HR'])
 def create_employee():
-    data = request.get_json()
-    required = ['email', 'first_name', 'last_name', 'password', 'personal_email']
-    if not all(k in data for k in required):
+    print("🔵 Create Employee Request Received...", flush=True)
+    data = request.get_json(force=True)
+    
+    email = data.get('email') or data.get('company_email')
+    required = ['first_name', 'last_name', 'password', 'personal_email']
+    if not email or not all(k in data for k in required):
         return jsonify({'message': 'Missing required fields'}), 400
         
     company_id = g.user.company_id
-    email = data['email'].lower().strip()
+    email = email.lower().strip()
     personal_email = data['personal_email'].lower().strip()
     
     if User.query.filter_by(email=email).first():
@@ -695,7 +796,7 @@ def create_employee():
         password=hashed_password,
         role=data.get('role', 'EMPLOYEE'),
         company_id=company_id,
-        is_active=True
+        status='ACTIVE'
     )
     db.session.add(new_user)
     db.session.flush()
@@ -720,24 +821,30 @@ def create_employee():
     db.session.add(new_employee)
     db.session.commit()
     
-    # Send Emails
-    creator_name = g.user.employee_profile.full_name if g.user.employee_profile else "Admin"
-    web_address = build_web_address(company.subdomain)
-    login_url = build_common_login_url(company.subdomain)
-    
-    # Mail 1: Alert
-    send_account_created_alert(personal_email, company.company_name, creator_name)
-    
-    # Mail 2: Credentials
-    send_login_credentials(
-        personal_email=personal_email,
-        company_email=email,
-        password=data['password'],
-        company_name=company.company_name,
-        web_address=web_address,
-        login_url=login_url,
-        created_by=creator_name
-    )
+    print(f"✅ Employee Created: {email} | Personal Email: {personal_email}", flush=True)
+
+    try:
+        # Send Emails
+        creator_name = g.user.employee_profile.full_name if g.user.employee_profile else "Admin"
+        web_address = build_web_address(company.subdomain)
+        login_url = build_common_login_url(company.subdomain)
+        
+        # Mail 1: Alert
+        send_account_created_alert(personal_email, company.company_name, creator_name)
+        
+        # Mail 2: Credentials
+        send_login_credentials(
+            personal_email=personal_email,
+            company_email=email,
+            password=data['password'],
+            company_name=company.company_name,
+            web_address=web_address,
+            login_url=login_url,
+            created_by=creator_name
+        )
+        print(f"📧 Credentials sent to {personal_email}", flush=True)
+    except Exception as e:
+        print(f"❌ Failed to send email: {e}", flush=True)
     
     return jsonify({'message': 'Employee created successfully'}), 201
 """
@@ -760,6 +867,7 @@ superadmin_bp = Blueprint('superadmin', __name__)
 @token_required
 @role_required(['SUPER_ADMIN'])
 def create_company():
+    print("🔵 Create Company Request Received...", flush=True)
     data = request.get_json()
     new_company = Company(company_name=data['company_name'], subdomain=data['subdomain'])
     db.session.add(new_company)
@@ -779,6 +887,7 @@ def create_company():
 @token_required
 @role_required(['SUPER_ADMIN'])
 def create_admin():
+    print("🔵 Create Admin Request Received...", flush=True)
     data = request.get_json()
     
     required_fields = ['company_id', 'company_email', 'password', 'first_name', 'last_name']
@@ -822,6 +931,8 @@ def create_admin():
     db.session.add(new_employee)
     db.session.commit()
 
+    print(f"✅ Admin Created: {data['company_email']}", flush=True)
+
     if data.get('personal_email'):
         web_address = build_web_address(company.subdomain)
         login_url = build_common_login_url(company.subdomain)
@@ -836,9 +947,11 @@ def create_admin():
             login_url=login_url,
             created_by="Super Admin"
         )
+        print(f"📧 Credentials sent to {data['personal_email']}", flush=True)
 
     return jsonify({'message': 'Company Admin created successfully'}), 201
 """
+
 
 routes_hr_py_content = """
 from flask import Blueprint, jsonify, request, g
@@ -934,32 +1047,456 @@ def get_profile():
 """
 
 routes_attendance_py_content = """
-from flask import Blueprint, jsonify, request, g
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime, date
+import csv
+import io
+
 from models import db
 from models.attendance import Attendance
 from models.employee import Employee
-from utils.decorators import token_required
+from models.user import User
+from utils.decorators import token_required, role_required
 
-attendance_bp = Blueprint('attendance', __name__)
+attendance_bp = Blueprint("attendance", __name__)
 
-@attendance_bp.route('/mark-in', methods=['POST'])
+ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR"]
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+def _parse_date(value: str) -> date:
+    """
+    Accepts:
+      - YYYY-MM-DD
+      - DD/MM/YYYY
+      - MM/DD/YYYY (if you want; can remove)
+    """
+    if not value:
+        raise ValueError("date is required")
+
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"Invalid date format: {value}")
+
+
+def _parse_time(value: str, base_date: date) -> datetime:
+    """
+    Accepts:
+      - HH:MM
+      - HH:MM:SS
+      - 09:45
+      - 19:34
+    """
+    if not value:
+        return None
+
+    value = value.strip()
+    for fmt in ("%H:%M", "%H:%M:%S"):
+        try:
+            t = datetime.strptime(value, fmt).time()
+            return datetime.combine(base_date, t)
+        except ValueError:
+            continue
+    raise ValueError(f"Invalid time format: {value}")
+
+
+def _format_logged_time(total_minutes: int) -> str:
+    hrs = total_minutes // 60
+    mins = total_minutes % 60
+    if hrs > 0 and mins > 0:
+        return f"{hrs} hrs {mins} mins"
+    if hrs > 0:
+        return f"{hrs} hrs"
+    return f"{mins} mins"
+
+
+def _get_employee_in_company(employee_id: int) -> Employee:
+    emp = Employee.query.get(employee_id)
+    if not emp or emp.company_id != g.user.company_id:
+        return None
+    return emp
+
+
+def _upsert_attendance(company_id: int, employee_id: int, att_date: date, payload: dict, capture_method: str):
+    row = Attendance.query.filter_by(
+        company_id=company_id,
+        employee_id=employee_id,
+        attendance_date=att_date
+    ).first()
+
+    is_new = False
+    if not row:
+        row = Attendance(company_id=company_id, employee_id=employee_id, attendance_date=att_date)
+        row.created_by = getattr(g.user, "id", None)
+        db.session.add(row)
+        is_new = True
+
+    # Update allowed fields
+    row.status = payload.get("status", row.status) or row.status
+    row.capture_method = capture_method
+
+    login_at = payload.get("login_at")
+    logout_at = payload.get("logout_at")
+
+    if login_at is not None:
+        row.punch_in_time = login_at
+    if logout_at is not None:
+        row.punch_out_time = logout_at
+
+    row.updated_by = getattr(g.user, "id", None)
+
+    # Auto calculate logged time
+    row.recalc_total_minutes()
+
+    return row, is_new
+
+
+# -----------------------------
+# 1) List Attendance (Table)
+# -----------------------------
+@attendance_bp.route("", methods=["GET"])
 @token_required
-def mark_in_time():
-    emp = Employee.query.filter_by(user_id=g.user.id).first()
-    if not emp: return jsonify({'message': 'Employee not found'}), 404
-    today = date.today()
-    existing = Attendance.query.filter_by(employee_id=emp.id, date=today).first()
-    if existing and existing.in_time: return jsonify({'message': 'Already marked in for today'}), 400
-    
-    if existing:
-        existing.in_time = datetime.utcnow()
-        existing.status = 'PRESENT'
-    else:
-        attendance = Attendance(employee_id=emp.id, date=today, in_time=datetime.utcnow(), status='PRESENT')
-        db.session.add(attendance)
+@role_required(ALLOWED_MANAGE_ROLES)
+def list_attendance():
+    """
+    Filters used by your UI:
+      - role (Admin/HR/Manager/Employee/Accountant)
+      - department
+      - day=all/today
+      - month (1-12) optional
+      - from_date, to_date
+      - search (name/email)
+    """
+    company_id = g.user.company_id
+
+    role = request.args.get("role")          # Role dropdown
+    department = request.args.get("department")
+    day = (request.args.get("day") or "all").lower()  # all / today
+    month = request.args.get("month")        # 1..12
+    from_date = request.args.get("from_date")
+    to_date = request.args.get("to_date")
+    search = (request.args.get("search") or "").strip().lower()
+
+    q = Attendance.query.filter_by(company_id=company_id)
+
+    # Day filter
+    if day == "today":
+        q = q.filter(Attendance.attendance_date == date.today())
+
+    # Date range filter
+    if from_date:
+        q = q.filter(Attendance.attendance_date >= _parse_date(from_date))
+    if to_date:
+        q = q.filter(Attendance.attendance_date <= _parse_date(to_date))
+
+    # Month filter (optional)
+    if month:
+        try:
+            m = int(month)
+            q = q.filter(db.extract("month", Attendance.attendance_date) == m)
+        except:
+            pass
+
+    # Join with employee + user for role/department/search
+    q = q.join(Employee, Employee.id == Attendance.employee_id)\
+         .join(User, User.id == Employee.user_id)\
+         .filter(Employee.company_id == company_id)
+
+    if department:
+        q = q.filter(Employee.department == department)
+
+    if role:
+        q = q.filter(User.role == role)
+
+    if search:
+        q = q.filter(
+            db.or_(
+                db.func.lower(Employee.first_name).like(f"%{search}%"),
+                db.func.lower(Employee.last_name).like(f"%{search}%"),
+                db.func.lower(User.email).like(f"%{search}%"),
+                db.func.lower(getattr(Employee, "employee_id", "")).like(f"%{search}%")
+            )
+        )
+
+    rows = q.order_by(Attendance.attendance_date.desc()).limit(500).all()
+
+    output = []
+    for r in rows:
+        emp = Employee.query.get(r.employee_id)
+        user = User.query.get(emp.user_id) if emp else None
+
+        output.append({
+            "attendance_id": r.attendance_id,
+            "employee_id": r.employee_id,
+            "name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "role": user.role if user else None,
+            "department": emp.department if emp else None,
+            "status": r.status,
+            "logged_time": _format_logged_time(r.total_minutes),
+            "login_at": r.punch_in_time.strftime("%H:%M") if r.punch_in_time else None,
+            "logout_at": r.punch_out_time.strftime("%H:%M") if r.punch_out_time else None,
+            "date": r.attendance_date.strftime("%d/%m/%Y"),
+        })
+
+    return jsonify({"attendance": output}), 200
+
+
+# -----------------------------
+# 2) Manual Attendance (Create/Upsert)
+# -----------------------------
+@attendance_bp.route("/manual", methods=["POST"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def manual_attendance():
+    """
+    Manual button action (UPSERT):
+      Required: employee_id, date
+      Optional: status, login_at, logout_at
+    """
+    data = request.get_json() or {}
+
+    employee_id = data.get("employee_id")
+    att_date = data.get("date")  # "2025-10-02" or "02/10/2025"
+    status = data.get("status", "Present")
+
+    if not employee_id or not att_date:
+        return jsonify({"message": "employee_id and date are required"}), 400
+
+    emp = _get_employee_in_company(int(employee_id))
+    if not emp:
+        return jsonify({"message": "Employee not found"}), 404
+
+    d = _parse_date(att_date)
+
+    login_at = None
+    logout_at = None
+
+    # If absent -> times should be empty (allowed)
+    if data.get("login_at"):
+        login_at = _parse_time(data["login_at"], d)
+    if data.get("logout_at"):
+        logout_at = _parse_time(data["logout_at"], d)
+
+    payload = {
+        "status": status,
+        "login_at": login_at,
+        "logout_at": logout_at
+    }
+
+    row, is_new = _upsert_attendance(g.user.company_id, emp.id, d, payload, capture_method="Manual")
     db.session.commit()
-    return jsonify({'message': 'In time marked successfully'})
+
+    return jsonify({
+        "message": "Attendance saved successfully",
+        "action": "inserted" if is_new else "updated",
+        "attendance_id": row.attendance_id
+    }), 200
+
+
+# -----------------------------
+# 3) Update Attendance (Edit icon)
+# -----------------------------
+@attendance_bp.route("/<int:attendance_id>", methods=["PUT"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def update_attendance(attendance_id):
+    data = request.get_json() or {}
+    row = Attendance.query.get(attendance_id)
+
+    if not row or row.company_id != g.user.company_id:
+        return jsonify({"message": "Attendance not found"}), 404
+
+    # Update values
+    if "status" in data:
+        row.status = data["status"] or row.status
+
+    if "login_at" in data:
+        if data["login_at"]:
+            row.punch_in_time = _parse_time(data["login_at"], row.attendance_date)
+        else:
+            row.punch_in_time = None
+
+    if "logout_at" in data:
+        if data["logout_at"]:
+            row.punch_out_time = _parse_time(data["logout_at"], row.attendance_date)
+        else:
+            row.punch_out_time = None
+
+    row.capture_method = "Manual"
+    row.updated_by = getattr(g.user, "id", None)
+    row.recalc_total_minutes()
+
+    db.session.commit()
+    return jsonify({"message": "Attendance updated successfully"}), 200
+
+
+# -----------------------------
+# 4) Delete Attendance (Delete icon)
+# -----------------------------
+@attendance_bp.route("/<int:attendance_id>", methods=["DELETE"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def delete_attendance(attendance_id):
+    row = Attendance.query.get(attendance_id)
+    if not row or row.company_id != g.user.company_id:
+        return jsonify({"message": "Attendance not found"}), 404
+
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"message": "Attendance deleted successfully"}), 200
+
+
+# -----------------------------
+# 5) Import Attendance (CSV/XLSX) with UPSERT
+# -----------------------------
+@attendance_bp.route("/import", methods=["POST"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def import_attendance():
+    """
+    Supports:
+      - CSV
+      - XLSX (optional)
+    Columns accepted:
+      employee_id (required) OR employee_code (if you store it in Employee.employee_id string)
+      date (required)
+      status (Present/Absent)
+      login_at (HH:MM)
+      logout_at (HH:MM)
+
+    UPSERT:
+      company_id + employee_id + date exists => update
+    """
+    if "file" not in request.files:
+        return jsonify({"message": "file is required (multipart/form-data)"}), 400
+
+    f = request.files["file"]
+    filename = (f.filename or "").lower()
+
+    inserted = 0
+    updated = 0
+    errors = []
+
+    company_id = g.user.company_id
+
+    def handle_row(raw, row_no):
+        nonlocal inserted, updated, errors
+
+        try:
+            # employee_id required
+            emp_id = raw.get("employee_id")
+            if not emp_id:
+                raise ValueError("employee_id is required")
+
+            emp = _get_employee_in_company(int(emp_id))
+            if not emp:
+                raise ValueError(f"Employee not found or not in company (employee_id={emp_id})")
+
+            d = _parse_date(raw.get("date", ""))
+
+            status = raw.get("status", "Present") or "Present"
+
+            login_at = _parse_time(raw.get("login_at", ""), d) if raw.get("login_at") else None
+            logout_at = _parse_time(raw.get("logout_at", ""), d) if raw.get("logout_at") else None
+
+            payload = {"status": status, "login_at": login_at, "logout_at": logout_at}
+
+            row, is_new = _upsert_attendance(company_id, emp.id, d, payload, capture_method="Import")
+            if is_new:
+                inserted += 1
+            else:
+                updated += 1
+
+        except Exception as e:
+            errors.append({"row": row_no, "error": str(e), "data": raw})
+
+    # CSV
+    if filename.endswith(".csv"):
+        stream = io.StringIO(f.stream.read().decode("utf-8", errors="ignore"))
+        reader = csv.DictReader(stream)
+
+        for idx, r in enumerate(reader, start=2):  # 2 => header is row 1
+            # normalize keys
+            row = { (k or "").strip().lower(): (v or "").strip() for k, v in r.items() }
+            handle_row(row, idx)
+
+        db.session.commit()
+        return jsonify({
+            "message": "Import completed",
+            "inserted": inserted,
+            "updated": updated,
+            "errors_count": len(errors),
+            "errors": errors[:50]  # return first 50 only
+        }), 200
+
+    # XLSX (optional)
+    if filename.endswith(".xlsx"):
+        try:
+            import openpyxl
+        except ImportError:
+            return jsonify({"message": "openpyxl not installed. Install it or use CSV."}), 400
+
+        wb = openpyxl.load_workbook(f, data_only=True)
+        ws = wb.active
+
+        headers = [str(c.value).strip().lower() if c.value else "" for c in ws[1]]
+
+        for i in range(2, ws.max_row + 1):
+            row_obj = {}
+            for j, h in enumerate(headers, start=1):
+                val = ws.cell(row=i, column=j).value
+                row_obj[h] = str(val).strip() if val is not None else ""
+
+            handle_row(row_obj, i)
+
+        db.session.commit()
+        return jsonify({
+            "message": "Import completed",
+            "inserted": inserted,
+            "updated": updated,
+            "errors_count": len(errors),
+            "errors": errors[:50]
+        }), 200
+
+    return jsonify({"message": "Unsupported file type. Use .csv or .xlsx"}), 400
+
+
+# -----------------------------
+# 6) Employee view only (No create)
+# -----------------------------
+@attendance_bp.route("/me", methods=["GET"])
+@token_required
+@role_required(["EMPLOYEE"])
+def my_attendance():
+    """
+    Employee can only view their own attendance.
+    No punch in/out APIs here.
+    """
+    emp = Employee.query.filter_by(user_id=g.user.id, company_id=g.user.company_id).first()
+    if not emp:
+        return jsonify({"message": "Employee profile not found"}), 404
+
+    q = Attendance.query.filter_by(company_id=g.user.company_id, employee_id=emp.id)\\
+                        .order_by(Attendance.attendance_date.desc())\\
+                        .limit(180)
+
+    output = []
+    for r in q.all():
+        output.append({
+            "status": r.status,
+            "logged_time": _format_logged_time(r.total_minutes),
+            "login_at": r.punch_in_time.strftime("%H:%M") if r.punch_in_time else None,
+            "logout_at": r.punch_out_time.strftime("%H:%M") if r.punch_out_time else None,
+            "date": r.attendance_date.strftime("%d/%m/%Y"),
+        })
+
+    return jsonify({"attendance": output}), 200
 """
 
 routes_employee_advanced_py_content = "from flask import Blueprint\nemployee_advanced_bp = Blueprint('employee_advanced', __name__)"
@@ -1390,6 +1927,7 @@ def organize_project():
         'auth', 
         'superadmin', 
         'employee',
+        'admin',
         'routes.py', 
         'models.py', 
         '__init__.py',
