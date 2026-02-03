@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, g
-from datetime import datetime
 from werkzeug.security import generate_password_hash
+from datetime import datetime
 from models import db
 from models.user import User
 from models.company import Company
@@ -37,9 +37,15 @@ def create_hr():
     db.session.add(new_user)
     db.session.flush()
 
+    company = Company.query.get(g.user.company_id)
+    emp_count = Employee.query.filter_by(company_id=g.user.company_id).count()
+    emp_code = f"{company.company_code}-{emp_count + 1:04d}"
+
     new_employee = Employee(
         user_id=new_user.id,
         company_id=g.user.company_id,
+        company_code=company.company_code,
+        employee_id=emp_code,
         first_name=data.get('first_name'),
         last_name=data.get('last_name'),
         company_email=email,
@@ -111,13 +117,13 @@ def create_employee():
     emp_count = Employee.query.filter_by(company_id=company_id).count()
     emp_code = f"{company.company_code}-{emp_count + 1:04d}"
     
-    date_of_joining = None
-    if data.get('date_of_joining'):
+    date_of_joining = data.get('date_of_joining')
+    if date_of_joining:
         try:
-            date_of_joining = datetime.strptime(data.get('date_of_joining'), '%Y-%m-%d').date()
+            date_of_joining = datetime.strptime(date_of_joining, '%Y-%m-%d').date()
         except ValueError:
-            return jsonify({'message': 'Invalid date format for date_of_joining. Use YYYY-MM-DD'}), 400
-    
+            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD'}), 400
+
     new_employee = Employee(
         user_id=new_user.id,
         company_id=company_id,

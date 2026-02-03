@@ -1,20 +1,17 @@
-from flask import Blueprint, request, jsonify, g, make_response, send_file, current_app
+from flask import Blueprint, request, jsonify, g
 from datetime import datetime, date
 import csv
 import io
-import os
-import openpyxl
-from werkzeug.utils import secure_filename
 
 from models import db
-from models.attendance import Attendance
+from models.attendance import Attendance, AttendanceRegularization
 from models.employee import Employee
 from models.user import User
 from utils.decorators import token_required, role_required
 
 attendance_bp = Blueprint("attendance", __name__)
 
-ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR", "MANAGER"]
+ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR"]
 
 
 # -----------------------------
@@ -70,15 +67,10 @@ def _format_logged_time(total_minutes: int) -> str:
     return f"{mins} mins"
 
 
-def _get_employee_in_company(identifier) -> Employee:
-    # 1. Try Primary Key (if numeric)
-    if str(identifier).isdigit():
-        emp = Employee.query.get(int(identifier))
-        if emp and emp.company_id == g.user.company_id:
-            return emp
-
-    # 2. Try Employee Code (string)
-    emp = Employee.query.filter_by(employee_id=str(identifier), company_id=g.user.company_id).first()
+def _get_employee_in_company(employee_id: int) -> Employee:
+    emp = Employee.query.get(employee_id)
+    if not emp or emp.company_id != g.user.company_id:
+        return None
     return emp
 
 
@@ -96,17 +88,21 @@ def _upsert_attendance(company_id: int, employee_id: int, att_date: date, payloa
         db.session.add(row)
         is_new = True
 
-    # Update allowed fields
-    row.status = payload.get("status", row.status) or row.status
+    # 1. Update status if provided
+    if payload.get("status"):
+        row.status = payload["status"]
+
+    # 2. If Absent, CLEAR times. Otherwise, update times if provided.
+    if row.status == "Absent":
+        row.punch_in_time = None
+        row.punch_out_time = None
+    else:
+        if payload.get("login_at") is not None:
+            row.punch_in_time = payload["login_at"]
+        if payload.get("logout_at") is not None:
+            row.punch_out_time = payload["logout_at"]
+
     row.capture_method = capture_method
-
-    login_at = payload.get("login_at")
-    logout_at = payload.get("logout_at")
-
-    if login_at is not None:
-        row.punch_in_time = login_at
-    if logout_at is not None:
-        row.punch_out_time = logout_at
 
     row.updated_by = getattr(g.user, "id", None)
 
@@ -124,7 +120,6 @@ def _upsert_attendance(company_id: int, employee_id: int, att_date: date, payloa
 @role_required(ALLOWED_MANAGE_ROLES)
 def list_attendance():
     """
-    GET /api/attendance
     Filters used by your UI:
       - role (Admin/HR/Manager/Employee/Accountant)
       - department
@@ -164,9 +159,7 @@ def list_attendance():
             pass
 
     # Join with employee + user for role/department/search
-    q = q.join(Employee, Employee.id == Attendance.employee_id)\
-         .join(User, User.id == Employee.user_id)\
-         .filter(Employee.company_id == company_id)
+    q = q.join(Employee, Employee.id == Attendance.employee_id)         .join(User, User.id == Employee.user_id)         .filter(Employee.company_id == company_id)
 
     if department:
         q = q.filter(Employee.department == department)
@@ -193,7 +186,7 @@ def list_attendance():
 
         output.append({
             "attendance_id": r.attendance_id,
-            "employee_id": r.employee_id,
+            "employee_id": emp.employee_id if emp else "",
             "name": f"{emp.first_name} {emp.last_name}" if emp else "",
             "role": user.role if user else None,
             "department": emp.department if emp else None,
@@ -208,53 +201,6 @@ def list_attendance():
 
 
 # -----------------------------
-# 7) Download Import Template
-# -----------------------------
-@attendance_bp.route("/import-template", methods=["GET"])
-@token_required
-def download_template():
-    """
-    Download CSV or XLSX template for attendance import.
-    Query param: format=csv (default) or format=xlsx
-    """
-    fmt = request.args.get("format", "csv").lower()
-
-    # Data from user requirement
-    headers = ["employee_id", "date", "status", "login_at", "logout_at"]
-    sample_data = [
-        [1, "2023-10-25", "Present", "09:00", "18:00"],
-        [2, "2023-10-25", "Absent", "", ""],
-        [3, "2023-10-25", "Present", "09:15", "18:10"]
-    ]
-
-    if fmt == "xlsx":
-        try:
-            from io import BytesIO
-            wb = openpyxl.Workbook()
-            ws = wb.active
-            ws.append(headers)
-            for row in sample_data:
-                ws.append(row)
-            out = BytesIO()
-            wb.save(out)
-            out.seek(0)
-            return send_file(out, download_name="attendance_import_template.xlsx", as_attachment=True, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        except ImportError:
-            return jsonify({"message": "openpyxl not installed"}), 500
-
-    # CSV Default
-    si = io.StringIO()
-    cw = csv.writer(si)
-    cw.writerow(headers)
-    cw.writerows(sample_data)
-    
-    output = make_response(si.getvalue())
-    output.headers["Content-Disposition"] = "attachment; filename=attendance_import_template.csv"
-    output.headers["Content-type"] = "text/csv"
-    return output
-
-
-# -----------------------------
 # 2) Manual Attendance (Create/Upsert)
 # -----------------------------
 @attendance_bp.route("/manual", methods=["POST"])
@@ -262,7 +208,6 @@ def download_template():
 @role_required(ALLOWED_MANAGE_ROLES)
 def manual_attendance():
     """
-    POST /api/attendance/manual
     Manual button action (UPSERT):
       Required: employee_id, date
       Optional: status, login_at, logout_at
@@ -271,12 +216,16 @@ def manual_attendance():
 
     employee_id = data.get("employee_id")
     att_date = data.get("date")  # "2025-10-02" or "02/10/2025"
-    status = data.get("status", "Present")
+    status = data.get("status")  # Don't default to "Present" here, let upsert handle it
 
     if not employee_id or not att_date:
         return jsonify({"message": "employee_id and date are required"}), 400
 
-    emp = _get_employee_in_company(employee_id)
+    # Handle Super Admin lookup (find employee across any company)
+    query = Employee.query.filter_by(employee_id=employee_id)
+    if g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+    emp = query.first()
     if not emp:
         return jsonify({"message": "Employee not found"}), 404
 
@@ -297,7 +246,7 @@ def manual_attendance():
         "logout_at": logout_at
     }
 
-    row, is_new = _upsert_attendance(g.user.company_id, emp.id, d, payload, capture_method="Manual")
+    row, is_new = _upsert_attendance(emp.company_id, emp.id, d, payload, capture_method="Manual")
     db.session.commit()
 
     return jsonify({
@@ -381,21 +330,11 @@ def import_attendance():
     UPSERT:
       company_id + employee_id + date exists => update
     """
-    # Try to get the file from 'file' key, or just take the first file uploaded
-    f = request.files.get("file")
-    if not f and request.files:
-        f = next(iter(request.files.values()))
+    if "file" not in request.files:
+        return jsonify({"message": "file is required (multipart/form-data)"}), 400
 
-    if not f:
-        return jsonify({"message": "File is required (multipart/form-data). Key should be 'file'."}), 400
-
+    f = request.files["file"]
     filename = (f.filename or "").lower()
-
-    # Save file to disk
-    upload_folder = os.path.join(current_app.config["UPLOAD_FOLDER"], "attendance_imports")
-    os.makedirs(upload_folder, exist_ok=True)
-    save_path = os.path.join(upload_folder, secure_filename(f.filename))
-    f.save(save_path)
 
     inserted = 0
     updated = 0
@@ -412,7 +351,7 @@ def import_attendance():
             if not emp_id:
                 raise ValueError("employee_id is required")
 
-            emp = _get_employee_in_company(emp_id)
+            emp = Employee.query.filter_by(employee_id=emp_id, company_id=company_id).first()
             if not emp:
                 raise ValueError(f"Employee not found or not in company (employee_id={emp_id})")
 
@@ -436,14 +375,13 @@ def import_attendance():
 
     # CSV
     if filename.endswith(".csv"):
-        # Read from saved file
-        with open(save_path, "r", encoding="utf-8", errors="ignore") as f_obj:
-            reader = csv.DictReader(f_obj)
+        stream = io.StringIO(f.stream.read().decode("utf-8", errors="ignore"))
+        reader = csv.DictReader(stream)
 
-            for idx, r in enumerate(reader, start=2):  # 2 => header is row 1
-                # normalize keys
-                row = { (k or "").strip().lower(): (v or "").strip() for k, v in r.items() }
-                handle_row(row, idx)
+        for idx, r in enumerate(reader, start=2):  # 2 => header is row 1
+            # normalize keys
+            row = { (k or "").strip().lower(): (v or "").strip() for k, v in r.items() }
+            handle_row(row, idx)
 
         db.session.commit()
         return jsonify({
@@ -456,8 +394,12 @@ def import_attendance():
 
     # XLSX (optional)
     if filename.endswith(".xlsx"):
+        try:
+            import openpyxl
+        except ImportError:
+            return jsonify({"message": "openpyxl not installed. Install it or use CSV."}), 400
 
-        wb = openpyxl.load_workbook(save_path, data_only=True)
+        wb = openpyxl.load_workbook(f, data_only=True)
         ws = wb.active
 
         headers = [str(c.value).strip().lower() if c.value else "" for c in ws[1]]
@@ -487,17 +429,20 @@ def import_attendance():
 # -----------------------------
 @attendance_bp.route("/me", methods=["GET"])
 @token_required
-@role_required(["EMPLOYEE", "ACCOUNTANT"])
+@role_required(["EMPLOYEE", "ADMIN", "HR", "MANAGER", "SUPER_ADMIN"])
 def my_attendance():
     """
     Employee can only view their own attendance.
     No punch in/out APIs here.
     """
-    emp = Employee.query.filter_by(user_id=g.user.id, company_id=g.user.company_id).first()
+    query = Employee.query.filter_by(user_id=g.user.id)
+    if g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+    emp = query.first()
     if not emp:
         return jsonify({"message": "Employee profile not found"}), 404
 
-    q = Attendance.query.filter_by(company_id=g.user.company_id, employee_id=emp.id)\
+    q = Attendance.query.filter_by(employee_id=emp.id)\
                         .order_by(Attendance.attendance_date.desc())\
                         .limit(180)
 
@@ -512,3 +457,245 @@ def my_attendance():
         })
 
     return jsonify({"attendance": output}), 200
+
+
+# -----------------------------
+# 7) Login / Logout APIs
+# -----------------------------
+@attendance_bp.route("/login", methods=["POST"])
+@token_required
+def attendance_login():
+    data = request.get_json()
+    employee_id = data.get("employee_id")
+    status = data.get("status", "Present")
+
+    if not employee_id:
+        return jsonify({"message": "employee_id required"}), 400
+
+    # Build query to find employee, handling Super Admin case
+    query = Employee.query.filter_by(employee_id=employee_id)
+    if g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+    emp = query.first()
+
+    if not emp:
+        return jsonify({"message": "Employee not found"}), 404
+
+    today = date.today()
+
+    attendance = Attendance.query.filter_by(
+        employee_id=emp.id,
+        attendance_date=today
+    ).first()
+
+    if attendance:
+        return jsonify({"message": "Already logged in"}), 400
+
+    punch_in_time = datetime.now()
+    if status == "Absent":
+        punch_in_time = None
+
+    attendance = Attendance(
+        employee_id=emp.id,
+        company_id=emp.company_id,
+        attendance_date=today,
+        punch_in_time=punch_in_time,
+        status=status,
+        capture_method="Manual",
+        created_by=g.user.id
+    )
+
+    db.session.add(attendance)
+    db.session.commit()
+
+    return jsonify({"message": "Login recorded"}), 201
+
+@attendance_bp.route("/logout", methods=["POST"])
+@token_required
+def attendance_logout():
+    data = request.get_json()
+    employee_id = data.get("employee_id")
+
+    # Build query to find employee, handling Super Admin case
+    query = Employee.query.filter_by(employee_id=employee_id)
+    if g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+    emp = query.first()
+    if not emp: return jsonify({"message": "Employee not found"}), 404
+
+    today = date.today()
+    attendance = Attendance.query.filter_by(employee_id=emp.id, attendance_date=today).first()
+
+    if not attendance: return jsonify({"message": "Login not found"}), 404
+    if attendance.punch_out_time: return jsonify({"message": "Already logged out"}), 400
+
+    attendance.punch_out_time = datetime.now()
+    attendance.updated_by = g.user.id
+    attendance.recalc_total_minutes()
+    db.session.commit()
+
+    return jsonify({"message": "Logout recorded"}), 200
+
+
+# -----------------------------
+# 8) Regularization (Correction)
+# -----------------------------
+@attendance_bp.route("/regularization/request", methods=["POST"])
+@token_required
+def create_regularization_request():
+    data = request.get_json()
+    
+    # 1. Identify Employee
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        return jsonify({"message": "Employee profile not found"}), 404
+
+    # 2. Validate Inputs
+    att_date_str = data.get("attendance_date")
+    if not att_date_str:
+        return jsonify({"message": "attendance_date is required"}), 400
+    
+    try:
+        d = _parse_date(att_date_str)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+
+    # 3. Parse Times (if provided)
+    login_at = None
+    logout_at = None
+    if data.get("requested_login_at"):
+        login_at = _parse_time(data["requested_login_at"], d)
+    if data.get("requested_logout_at"):
+        logout_at = _parse_time(data["requested_logout_at"], d)
+
+    # 4. Create Request
+    reg = AttendanceRegularization(
+        company_id=emp.company_id,
+        employee_id=emp.id,
+        attendance_date=d,
+        requested_status=data.get("requested_status"),
+        requested_punch_in=login_at,
+        requested_punch_out=logout_at,
+        reason=data.get("reason"),
+        status="PENDING"
+    )
+    
+    db.session.add(reg)
+    db.session.commit()
+
+    return jsonify({
+        "message": "Regularization request submitted",
+        "request_id": reg.id,
+        "status": "PENDING"
+    }), 201
+
+@attendance_bp.route("/regularization/my-requests", methods=["GET"])
+@token_required
+def my_regularization_requests():
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        return jsonify({"message": "Employee profile not found"}), 404
+
+    reqs = AttendanceRegularization.query.filter_by(employee_id=emp.id).order_by(AttendanceRegularization.created_at.desc()).all()
+    
+    output = []
+    for r in reqs:
+        # Fetch current status
+        att = Attendance.query.filter_by(employee_id=emp.id, attendance_date=r.attendance_date).first()
+        current_status = att.status if att else "Absent"
+
+        output.append({
+            "request_id": r.id,
+            "attendance_date": r.attendance_date.strftime("%Y-%m-%d"),
+            "current_status": current_status,
+            "requested_status": r.requested_status,
+            "status": r.status,
+            "reason": r.reason,
+            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M")
+        })
+    return jsonify({"requests": output}), 200
+
+@attendance_bp.route("/regularization/pending", methods=["GET"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def pending_regularization_requests():
+    q = AttendanceRegularization.query
+    
+    # Super Admin sees all, others see only their company
+    if g.user.role != 'SUPER_ADMIN':
+        q = q.filter_by(company_id=g.user.company_id)
+
+    # Filters
+    status = request.args.get("status", "PENDING")
+    if status:
+        q = q.filter_by(status=status)
+
+    rows = q.order_by(AttendanceRegularization.created_at.desc()).all()
+    
+    output = []
+    for r in rows:
+        # Fetch current status
+        att = Attendance.query.filter_by(employee_id=r.employee_id, attendance_date=r.attendance_date).first()
+        current_status = att.status if att else "Absent"
+
+        output.append({
+            "request_id": r.id,
+            "employee_id": r.employee.employee_id if r.employee else "",
+            "employee_name": r.employee.full_name if r.employee else "Unknown",
+            "attendance_date": r.attendance_date.strftime("%Y-%m-%d"),
+            "current_status": current_status,
+            "requested_status": r.requested_status,
+            "requested_login_at": r.requested_punch_in.strftime("%H:%M") if r.requested_punch_in else None,
+            "requested_logout_at": r.requested_punch_out.strftime("%H:%M") if r.requested_punch_out else None,
+            "reason": r.reason,
+            "status": r.status
+        })
+    return jsonify({"pending": output}), 200
+
+@attendance_bp.route("/regularization/<int:request_id>/approve", methods=["POST"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def approve_regularization(request_id):
+    data = request.get_json() or {}
+    req = AttendanceRegularization.query.get_or_404(request_id)
+    
+    if g.user.role != 'SUPER_ADMIN' and req.company_id != g.user.company_id:
+        return jsonify({"message": "Unauthorized"}), 403
+
+    req.status = "APPROVED"
+    req.approved_by = g.user.id
+    req.approver_comment = data.get("approver_comment")
+
+    # --- UPDATE ATTENDANCE ---
+    att = Attendance.query.filter_by(employee_id=req.employee_id, attendance_date=req.attendance_date).first()
+    if not att:
+        att = Attendance(company_id=req.company_id, employee_id=req.employee_id, attendance_date=req.attendance_date, created_by=g.user.id)
+        db.session.add(att)
+
+    if req.requested_status: att.status = req.requested_status
+    if req.requested_punch_in: att.punch_in_time = req.requested_punch_in
+    if req.requested_punch_out: att.punch_out_time = req.requested_punch_out
+    
+    att.capture_method = "Regularization"
+    att.updated_by = g.user.id
+    att.recalc_total_minutes()
+    
+    db.session.commit()
+    return jsonify({"message": "Request approved and attendance updated", "request_id": req.id, "attendance_action": "updated"}), 200
+
+@attendance_bp.route("/regularization/<int:request_id>/reject", methods=["POST"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def reject_regularization(request_id):
+    data = request.get_json() or {}
+    req = AttendanceRegularization.query.get_or_404(request_id)
+
+    if g.user.role != 'SUPER_ADMIN' and req.company_id != g.user.company_id:
+        return jsonify({"message": "Unauthorized"}), 403
+
+    req.status = "REJECTED"
+    req.approved_by = g.user.id
+    req.approver_comment = data.get("approver_comment")
+    
+    db.session.commit()
+    return jsonify({"message": "Request rejected", "request_id": req.id, "status": "REJECTED"}), 200

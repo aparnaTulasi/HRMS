@@ -45,3 +45,29 @@ class Attendance(db.Model):
             self.total_minutes = int(diff.total_seconds() // 60)
         else:
             self.total_minutes = 0
+
+class AttendanceRegularization(db.Model):
+    __tablename__ = "attendance_regularization"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey("companies.id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False)
+    
+    attendance_date = db.Column(db.Date, nullable=False)
+    
+    # What they want to change to
+    requested_status = db.Column(db.String(20))
+    requested_punch_in = db.Column(db.DateTime)
+    requested_punch_out = db.Column(db.DateTime)
+    
+    reason = db.Column(db.Text)
+    
+    # Workflow
+    status = db.Column(db.String(20), default="PENDING") # PENDING, APPROVED, REJECTED
+    approver_comment = db.Column(db.Text)
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"))
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    employee = db.relationship("Employee", backref="regularization_requests")

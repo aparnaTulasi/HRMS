@@ -36,9 +36,6 @@ def login():
     if not user or not check_password_hash(user.password, data['password']):
         return jsonify({'message': 'Invalid credentials'}), 401
 
-    if user.status == 'PENDING_OTP':
-        return jsonify({'message': 'OTP verification required', 'code': 'OTP_REQUIRED'}), 403
-
     token = jwt.encode({
         'user_id': user.id, 'email': user.email, 'role': user.role,
         'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)

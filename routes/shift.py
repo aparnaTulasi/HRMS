@@ -161,8 +161,13 @@ def assign_shift():
     if missing:
         return jsonify({"message": f"Missing fields: {missing}"}), 400
 
-    emp = Employee.query.get(int(data["employee_id"]))
-    if not emp or emp.company_id != g.user.company_id:
+    # Lookup employee by string ID (FIS...) or internal ID
+    emp_input = data["employee_id"]
+    emp = Employee.query.filter_by(employee_id=str(emp_input), company_id=g.user.company_id).first()
+    if not emp and str(emp_input).isdigit():
+        emp = Employee.query.filter_by(id=int(emp_input), company_id=g.user.company_id).first()
+
+    if not emp:
         return jsonify({"message": "Employee not found"}), 404
 
     s = Shift.query.get(int(data["shift_id"]))
@@ -184,10 +189,24 @@ def assign_shift():
     if exists:
         return jsonify({"message": "Shift assignment already exists for this employee and start_date"}), 409
 
+    # Determine shift details (override from body or fallback to Shift definition)
+    assign_shift_name = data.get("shift_name") or s.shift_name
+    
+    assign_start_time = s.start_time
+    if data.get("start_time"):
+        assign_start_time = _parse_time(data["start_time"])
+        
+    assign_end_time = s.end_time
+    if data.get("end_time"):
+        assign_end_time = _parse_time(data["end_time"])
+
     a = ShiftAssignment(
         company_id=g.user.company_id,
         employee_id=emp.id,
         shift_id=s.shift_id,
+        shift_name=assign_shift_name,
+        start_time=assign_start_time,
+        end_time=assign_end_time,
         start_date=start_d,
         end_date=end_d
     )
@@ -206,10 +225,15 @@ def list_assignments():
     rows = ShiftAssignment.query.filter_by(company_id=g.user.company_id).order_by(ShiftAssignment.assignment_id.desc()).all()
     output = []
     for a in rows:
+        emp = Employee.query.get(a.employee_id)
         output.append({
             "assignment_id": a.assignment_id,
-            "employee_id": a.employee_id,
+            "employee_id": emp.employee_id if emp else "",
+            "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "Unknown",
             "shift_id": a.shift_id,
+            "shift_name": a.shift_name,
+            "start_time": a.start_time.strftime("%H:%M") if a.start_time else None,
+            "end_time": a.end_time.strftime("%H:%M") if a.end_time else None,
             "start_date": a.start_date.isoformat(),
             "end_date": a.end_date.isoformat() if a.end_date else None
         })

@@ -15,22 +15,34 @@ superadmin_bp = Blueprint('superadmin', __name__)
 @token_required
 @role_required(['SUPER_ADMIN'])
 def create_company():
-    print("🔵 Create Company Request Received...", flush=True)
     data = request.get_json()
-    new_company = Company(company_name=data['company_name'], subdomain=data['subdomain'])
+    new_company = Company(
+        company_name=data['company_name'], 
+        subdomain=data['subdomain'],
+        company_code=data.get('company_code'),
+        industry=data.get('industry'),
+        company_size=data.get('company_size'),
+        state=data.get('state'),
+        country=data.get('country'),
+        city_branch=data.get('city_branch'),
+        timezone=data.get('timezone')
+    )
     db.session.add(new_company)
     db.session.flush()
 
-    hashed_password = generate_password_hash(data['admin_password'], method='pbkdf2:sha256')
-    new_admin = User(email=data['admin_email'], password=hashed_password, role='ADMIN', company_id=new_company.id)
-    db.session.add(new_admin)
-    db.session.flush()
+    if data.get('admin_email') and data.get('admin_password'):
+        hashed_password = generate_password_hash(data['admin_password'], method='pbkdf2:sha256')
+        new_admin = User(email=data['admin_email'], password=hashed_password, role='ADMIN', company_id=new_company.id)
+        db.session.add(new_admin)
+        db.session.flush()
 
-    admin_emp = Employee(user_id=new_admin.id, company_id=new_company.id, first_name=data.get('admin_first_name', 'Admin'), last_name=data.get('admin_last_name', 'User'))
-    db.session.add(admin_emp)
+        admin_emp = Employee(user_id=new_admin.id, company_id=new_company.id, first_name=data.get('admin_first_name', 'Admin'), last_name=data.get('admin_last_name', 'User'))
+        db.session.add(admin_emp)
+        db.session.commit()
+        return jsonify({'message': 'Company and Admin created'}), 201
+
     db.session.commit()
-    print(f"✅ Company Created: {data['company_name']} | Admin: {data['admin_email']}", flush=True)
-    return jsonify({'message': 'Company and Admin created'}), 201
+    return jsonify({'message': 'Company created successfully'}), 201
 
 @superadmin_bp.route('/create-admin', methods=['POST'])
 @token_required

@@ -177,6 +177,11 @@ class Company(db.Model):
     subdomain = db.Column(db.String(50), unique=True, nullable=False)
     company_code = db.Column(db.String(20), unique=True)
     industry = db.Column(db.String(100))
+    company_size = db.Column(db.String(50))
+    state = db.Column(db.String(100))
+    country = db.Column(db.String(100))
+    city_branch = db.Column(db.String(100))
+    timezone = db.Column(db.String(50))
     address = db.Column(db.Text)
     phone = db.Column(db.String(20))
     email = db.Column(db.String(120))
@@ -233,8 +238,8 @@ class Employee(db.Model):
         return f"{self.first_name} {self.last_name}"
 """
 
-models_attendance_py_content = """
- from datetime import datetime, date
+models_attendance_py_content = '''
+from datetime import datetime, date
 from models import db
 
 class Attendance(db.Model):
@@ -281,7 +286,7 @@ class Attendance(db.Model):
             self.total_minutes = int(diff.total_seconds() // 60)
         else:
             self.total_minutes = 0
-"""
+'''
 
 models_permission_py_content = """
 from datetime import datetime
@@ -695,6 +700,7 @@ def verify_signup_otp():
 routes_admin_py_content = """
 from flask import Blueprint, jsonify, request, g
 from werkzeug.security import generate_password_hash
+from datetime import datetime
 from models import db
 from models.user import User
 from models.company import Company
@@ -731,9 +737,15 @@ def create_hr():
     db.session.add(new_user)
     db.session.flush()
 
+    company = Company.query.get(g.user.company_id)
+    emp_count = Employee.query.filter_by(company_id=g.user.company_id).count()
+    emp_code = f"{company.company_code}-{emp_count + 1:04d}"
+
     new_employee = Employee(
         user_id=new_user.id,
         company_id=g.user.company_id,
+        company_code=company.company_code,
+        employee_id=emp_code,
         first_name=data.get('first_name'),
         last_name=data.get('last_name'),
         company_email=email,
@@ -805,6 +817,13 @@ def create_employee():
     emp_count = Employee.query.filter_by(company_id=company_id).count()
     emp_code = f"{company.company_code}-{emp_count + 1:04d}"
     
+    date_of_joining = data.get('date_of_joining')
+    if date_of_joining:
+        try:
+            date_of_joining = datetime.strptime(date_of_joining, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD'}), 400
+
     new_employee = Employee(
         user_id=new_user.id,
         company_id=company_id,
@@ -816,7 +835,7 @@ def create_employee():
         personal_email=personal_email,
         department=data.get('department'),
         designation=data.get('designation'),
-        date_of_joining=data.get('date_of_joining')
+        date_of_joining=date_of_joining
     )
     db.session.add(new_employee)
     db.session.commit()
@@ -869,19 +888,28 @@ superadmin_bp = Blueprint('superadmin', __name__)
 def create_company():
     print("🔵 Create Company Request Received...", flush=True)
     data = request.get_json()
-    new_company = Company(company_name=data['company_name'], subdomain=data['subdomain'])
+    
+    if Company.query.filter_by(subdomain=data['subdomain']).first():
+        return jsonify({'message': 'Subdomain already exists'}), 409
+
+      new_company = Company(
+        company_name=data['company_name'], 
+        subdomain=data['subdomain'],
+        company_code=data.get('company_code'),
+        industry=data.get('industry')
+    )
+    allowed_fields = [
+        "company_name", "subdomain", "company_code",
+        "industry", "company_size",
+        "state", "country", "city_branch", "timezone"
+    ]
+    filtered_data = {k: v for k, v in data.items() if k in allowed_fields}
+
+    new_company = Company(**filtered_data)
     db.session.add(new_company)
-    db.session.flush()
-
-    hashed_password = generate_password_hash(data['admin_password'], method='pbkdf2:sha256')
-    new_admin = User(email=data['admin_email'], password=hashed_password, role='ADMIN', company_id=new_company.id)
-    db.session.add(new_admin)
-    db.session.flush()
-
-    admin_emp = Employee(user_id=new_admin.id, company_id=new_company.id, first_name=data.get('admin_first_name', 'Admin'), last_name=data.get('admin_last_name', 'User'))
-    db.session.add(admin_emp)
     db.session.commit()
-    return jsonify({'message': 'Company and Admin created'}), 201
+    
+    return jsonify({'message': 'Company created successfully', 'company': {'id': new_company.id, 'name': new_company.company_name}}), 201
 
 @superadmin_bp.route('/create-admin', methods=['POST'])
 @token_required
@@ -1046,7 +1074,7 @@ def get_profile():
 # Other employee routes like /bank, /address etc. would go here
 """
 
-routes_attendance_py_content = """
+routes_attendance_py_content = '''
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, date
 import csv
@@ -1497,7 +1525,7 @@ def my_attendance():
         })
 
     return jsonify({"attendance": output}), 200
-"""
+'''
 
 routes_employee_advanced_py_content = "from flask import Blueprint\nemployee_advanced_bp = Blueprint('employee_advanced', __name__)"
 routes_urls_py_content = "from flask import Blueprint\nurls_bp = Blueprint('urls', __name__)"

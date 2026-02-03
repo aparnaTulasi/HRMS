@@ -428,6 +428,218 @@
 				}
 			]
 		}
+		{
+			"name": "Regularization",
+			"item": [
+				{
+					"name": "1. Create Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"attendance_date\": \"2026-02-02\",\n  \"requested_status\": \"Present\",\n  \"requested_login_at\": \"09:00\",\n  \"requested_logout_at\": \"18:00\",\n  \"reason\": \"Forgot to punch in\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/attendance/regularization/request",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"attendance",
+								"regularization",
+								"request"
+							]
+						}
+					}
+				},
+				{
+					"name": "2. My Requests",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/attendance/regularization/my-requests",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"attendance",
+								"regularization",
+								"my-requests"
+							]
+						}
+					}
+				},
+				{
+					"name": "3. Pending Requests (Admin)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/attendance/regularization/pending?status=PENDING",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"attendance",
+								"regularization",
+								"pending"
+							],
+							"query": [
+								{
+									"key": "status",
+									"value": "PENDING"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "4. Approve Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_comment\": \"Approved\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/attendance/regularization/1/approve",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"attendance",
+								"regularization",
+								"1",
+								"approve"
+							]
+						}
+					}
+				},
+				{
+					"name": "5. Reject Request",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}",
+								"type": "text"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"approver_comment\": \"Rejected\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{base_url}}/api/attendance/regularization/1/reject",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"attendance",
+								"regularization",
+								"1",
+								"reject"
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Shifts",
+			"item": [
+				{
+					"name": "1. Create Shift",
+					"request": {
+						"method": "POST",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"shift_name\": \"General Shift\",\n  \"start_time\": \"09:30\",\n  \"end_time\": \"18:30\",\n  \"weekly_off\": \"Sunday\",\n  \"description\": \"Default shift\",\n  \"is_active\": \"Yes\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/api/shifts", "host": ["{{base_url}}"], "path": ["api", "shifts"] }
+					}
+				},
+				{
+					"name": "2. List Shifts",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"url": { "raw": "{{base_url}}/api/shifts", "host": ["{{base_url}}"], "path": ["api", "shifts"] }
+					}
+				},
+				{
+					"name": "3. Assign Shift",
+					"request": {
+						"method": "POST",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"employee_id\": \"FIS001-0004\",\n  \"shift_id\": 1,\n  \"start_date\": \"2026-02-01\"\n}",
+							"options": { "raw": { "language": "json" } }
+						},
+						"url": { "raw": "{{base_url}}/api/shifts/assign", "host": ["{{base_url}}"], "path": ["api", "shifts", "assign"] }
+					}
+				},
+				{
+					"name": "4. List Assignments",
+					"request": {
+						"method": "GET",
+						"header": [ { "key": "Authorization", "value": "Bearer {{token}}", "type": "text" } ],
+						"url": { "raw": "{{base_url}}/api/shifts/assignments", "host": ["{{base_url}}"], "path": ["api", "shifts", "assignments"] }
+					}
+				}
+			]
+		}
 	],
 	"variable": [
 		{
