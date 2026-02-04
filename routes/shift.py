@@ -253,3 +253,34 @@ def delete_assignment(assignment_id):
     db.session.delete(a)
     db.session.commit()
     return jsonify({"message": "Assignment deleted"}), 200
+
+# -----------------------------
+# 8) Employee View My Shifts
+# -----------------------------
+@shift_bp.route("/me", methods=["GET"])
+@token_required
+def my_shifts():
+    # Find employee profile
+    query = Employee.query.filter_by(user_id=g.user.id)
+    if g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+    emp = query.first()
+    
+    if not emp:
+        return jsonify({"message": "Employee profile not found"}), 404
+
+    assignments = ShiftAssignment.query.filter_by(employee_id=emp.id).order_by(ShiftAssignment.start_date.desc()).all()
+    
+    output = []
+    for a in assignments:
+        output.append({
+            "assignment_id": a.assignment_id,
+            "shift_id": a.shift_id,
+            "shift_name": a.shift_name,
+            "start_time": a.start_time.strftime("%H:%M") if a.start_time else None,
+            "end_time": a.end_time.strftime("%H:%M") if a.end_time else None,
+            "start_date": a.start_date.isoformat(),
+            "end_date": a.end_date.isoformat() if a.end_date else None
+        })
+
+    return jsonify({"shifts": output}), 200
