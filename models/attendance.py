@@ -15,12 +15,14 @@ class Attendance(db.Model):
     # Main unique key for UPSERT
     attendance_date = db.Column(db.Date, nullable=False, index=True)
 
+    # Performance filters & Extras
+    year = db.Column(db.Integer, index=True, default=lambda: datetime.utcnow().year)
+    month = db.Column(db.Integer, index=True, default=lambda: datetime.utcnow().month)
+    remarks = db.Column(db.Text, nullable=True)
+
     # Times (optional for Absent)
     punch_in_time = db.Column(db.DateTime, nullable=True)
     punch_out_time = db.Column(db.DateTime, nullable=True)
-
-    # Stored to show "Logged Time"
-    total_minutes = db.Column(db.Integer, default=0, nullable=False)
 
     # Present / Absent / Leave / Half Day etc. (keep it flexible)
     status = db.Column(db.String(20), default="Present", nullable=False)
@@ -39,12 +41,12 @@ class Attendance(db.Model):
         db.UniqueConstraint("company_id", "employee_id", "attendance_date", name="uq_att_company_emp_date"),
     )
 
-    def recalc_total_minutes(self):
+    @property
+    def total_minutes(self):
         if self.punch_in_time and self.punch_out_time and self.punch_out_time > self.punch_in_time:
             diff = self.punch_out_time - self.punch_in_time
-            self.total_minutes = int(diff.total_seconds() // 60)
-        else:
-            self.total_minutes = 0
+            return int(diff.total_seconds() // 60)
+        return 0
 
 class AttendanceRegularization(db.Model):
     __tablename__ = "attendance_regularization"

@@ -1,7 +1,9 @@
 from flask import Blueprint, jsonify, request, g
+from datetime import datetime
 from models import db
 from models.user import User
 from models.employee import Employee
+from models.employee_onboarding_request import EmployeeOnboardingRequest
 from utils.decorators import token_required, role_required
 
 hr_bp = Blueprint('hr', __name__)
@@ -37,3 +39,23 @@ def approve_employee(user_id):
     user.status = 'ACTIVE'
     db.session.commit()
     return jsonify({'message': 'Employee approved successfully', 'status': 'ACTIVE'})
+
+@hr_bp.route('/onboarding-request', methods=['POST'])
+@token_required
+@role_required(['HR'])
+def create_onboarding_request():
+    data = request.get_json(force=True)
+
+    req = EmployeeOnboardingRequest(
+        company_id=g.user.company_id,
+        requested_by=g.user.id,
+        first_name=data['first_name'],
+        last_name=data['last_name'],
+        personal_email=data['personal_email'],
+        department=data.get('department'),
+        designation=data.get('designation'),
+        date_of_joining=datetime.strptime(data['date_of_joining'], '%Y-%m-%d').date() if data.get('date_of_joining') else None,
+    )
+    db.session.add(req)
+    db.session.commit()
+    return jsonify({"message": "Onboarding request created", "request_id": req.id}), 201

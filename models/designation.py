@@ -1,11 +1,11 @@
 from models import db
 
-class Department(db.Model):
-    __tablename__ = 'departments'
+class Designation(db.Model):
+    __tablename__ = 'designations'
 
     id = db.Column(db.Integer, primary_key=True)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
-    department_name = db.Column(db.String(100), nullable=False)
+    designation_name = db.Column(db.String(100), nullable=False)
 
     def __repr__(self):
-        return f"<Department {self.department_name}>"
+        return f"<Designation {self.designation_name}>"

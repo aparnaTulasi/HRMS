@@ -115,7 +115,7 @@ def register():
         db.session.rollback()
         return jsonify({'message': 'Registration failed', 'error': str(e)}), 500
 
-@auth_bp.route('/verify-otp', methods=['POST'])
+@auth_bp.route('/verify-signup-otp', methods=['POST'])
 def verify_otp():
     data = request.get_json()
     user = User.query.filter_by(email=data['email']).first()

@@ -84,3 +84,32 @@ def send_login_success_email(to_email, login_time):
     # Run in separate thread
     thread = threading.Thread(target=send_async_email, args=(msg,))
     thread.start()
+
+def send_password_reset_otp(to_email, otp):
+    """Sends an OTP for password reset."""
+    subject = "Password Reset OTP"
+    
+    body = f"""
+    <html>
+    <body>
+        <h3>Password Reset Request</h3>
+        <p>Hello,</p>
+        <p>You requested to reset your password. Please use the OTP below to proceed:</p>
+        <h2 style="color: #2c3e50; letter-spacing: 2px;">{otp}</h2>
+        <p>This OTP is valid for 10 minutes.</p>
+        <p>If you did not request a password reset, please ignore this email.</p>
+        <br>
+        <p>Regards,<br>HRMS Team</p>
+    </body>
+    </html>
+    """
+
+    msg = MIMEMultipart()
+    msg["From"] = os.getenv("MAIL_USERNAME", "HRMS Security")
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html"))
+
+    # Run in separate thread
+    thread = threading.Thread(target=send_async_email, args=(msg,))
+    thread.start()

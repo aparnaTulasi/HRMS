@@ -8,6 +8,7 @@ from utils.decorators import token_required, role_required
 from models.employee import Employee
 from utils.email_utils import send_account_created_alert, send_login_credentials
 from utils.url_generator import build_web_address, build_common_login_url
+from models.employee_onboarding_request import EmployeeOnboardingRequest
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -166,3 +167,93 @@ def create_employee():
         print(f"❌ Failed to send email: {e}", flush=True)
     
     return jsonify({'message': 'Employee created successfully'}), 201
+
+@admin_bp.route('/onboarding-requests', methods=['GET'])
+@token_required
+@role_required(['ADMIN'])
+def list_onboarding_requests():
+    reqs = EmployeeOnboardingRequest.query.filter_by(company_id=g.user.company_id).all()
+    return jsonify([{
+        "id": r.id,
+        "first_name": r.first_name,
+        "last_name": r.last_name,
+        "personal_email": r.personal_email,
+        "department": r.department,
+        "designation": r.designation,
+        "date_of_joining": r.date_of_joining.isoformat() if r.date_of_joining else None,
+        "status": r.status
+    } for r in reqs])
+
+@admin_bp.route('/onboarding-requests/<int:req_id>/approve', methods=['POST'])
+@token_required
+@role_required(['ADMIN'])
+def approve_onboarding_request(req_id):
+    r = EmployeeOnboardingRequest.query.filter_by(id=req_id, company_id=g.user.company_id).first()
+    if not r:
+        return jsonify({"message": "Request not found"}), 404
+    if r.status != "PENDING":
+        return jsonify({"message": "Request already processed"}), 400
+
+    r.status = "APPROVED"
+    r.approved_by = g.user.id
+    r.approved_at = datetime.utcnow()
+    db.session.commit()
+
+    return jsonify({"message": "Request approved. Now create employee with /api/admin/employees"}), 200
+
+@admin_bp.route('/employees/<int:emp_id>', methods=['PUT'])
+@token_required
+@role_required(['ADMIN','HR'])
+def update_employee(emp_id):
+    emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    if not emp:
+        return jsonify({"message":"Employee not found"}), 404
+
+    data = request.get_json(force=True)
+    allowed = [
+        "first_name","last_name","gender","date_of_birth","father_or_husband_name","mother_name",
+        "department","designation","salary","date_of_joining","work_phone","personal_mobile",
+        "personal_email","company_email","work_mode","branch_id","aadhaar_number","pan_number"
+    ]
+    for k in allowed:
+        if k in data:
+            if k in ["date_of_birth", "date_of_joining"] and data[k]:
+                try:
+                    val = datetime.strptime(data[k], '%Y-%m-%d').date()
+                    setattr(emp, k, val)
+                except ValueError:
+                    pass
+            else:
+                setattr(emp, k, data[k])
+    db.session.commit()
+    return jsonify({"message":"Employee updated"}), 200
+
+@admin_bp.route('/employees/<int:emp_id>/education', methods=['POST'])
+@token_required
+@role_required(['ADMIN','HR'])
+def save_education(emp_id):
+    emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    if not emp: return jsonify({"message":"Employee not found"}), 404
+    emp.education_details = request.get_json(force=True)
+    db.session.commit()
+    return jsonify({"message":"Education saved"}), 200
+
+@admin_bp.route('/employees/<int:emp_id>/last-work', methods=['POST'])
+@token_required
+@role_required(['ADMIN','HR'])
+def save_last_work(emp_id):
+    emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    if not emp: return jsonify({"message":"Employee not found"}), 404
+    emp.last_work_details = request.get_json(force=True)
+    db.session.commit()
+    return jsonify({"message":"Last work saved"}), 200
+
+@admin_bp.route('/employees/<int:emp_id>/statutory', methods=['POST'])
+@token_required
+@role_required(['ADMIN','HR'])
+def save_statutory(emp_id):
+    emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    if not emp: return jsonify({"message":"Employee not found"}), 404
+    emp.statutory_details = request.get_json(force=True)
+    db.session.commit()
+    return jsonify({"message":"Statutory saved"}), 200

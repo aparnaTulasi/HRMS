@@ -24,6 +24,24 @@ def upload_document():
     if file.filename == '':
         return jsonify({'message': 'No selected file'}), 400
 
+    # Determine target employee ID
+    employee_id = None
+    target_employee_id = request.form.get("employee_id")
+
+    if target_employee_id:
+        # Only ADMIN/HR/SUPER_ADMIN can upload for others
+        if g.user.role not in ['ADMIN','HR','SUPER_ADMIN']:
+            return jsonify({"message":"Access denied"}), 403
+        emp = Employee.query.filter_by(id=int(target_employee_id), company_id=g.user.company_id).first()
+        if not emp:
+            return jsonify({"message":"Employee not found"}), 404
+        employee_id = emp.id
+    else:
+        # Employee self upload
+        if not g.user.employee_profile:
+            return jsonify({"message":"Employee profile not found"}), 404
+        employee_id = g.user.employee_profile.id
+
     original_filename = secure_filename(file.filename)
     file_extension = original_filename.rsplit('.', 1)[1].lower()
     unique_filename = f"{uuid.uuid4().hex}.{file_extension}"
@@ -32,7 +50,7 @@ def upload_document():
     file.save(file_path)
 
     new_document = EmployeeDocument(
-        employee_id=g.user.employee_profile.id,
+        employee_id=employee_id,
         document_type=request.form.get('document_type'),
         document_name=original_filename,
         file_path=file_path,

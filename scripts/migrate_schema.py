@@ -15,6 +15,8 @@ def run_migration():
     # Drop old attendance table to recreate with new schema
     cursor.execute("DROP TABLE IF EXISTS attendance")
     cursor.execute("DROP TABLE IF EXISTS attendance_logs")
+    cursor.execute("DROP TABLE IF EXISTS attendance_punch_logs")
+    cursor.execute("DROP TABLE IF EXISTS attendance_devices")
     
     # Create new attendance table
     cursor.execute("""
@@ -42,6 +44,7 @@ def run_migration():
     cursor.execute("DROP TABLE IF EXISTS shift")
     cursor.execute("DROP TABLE IF EXISTS shift_assignment")
     cursor.execute("DROP TABLE IF EXISTS regularization_requests")
+    cursor.execute("DROP TABLE IF EXISTS attendance_regularizations")
 
     print("🔄 Rebuilding Leave tables...")
     cursor.execute("DROP TABLE IF EXISTS leaves") # Old table

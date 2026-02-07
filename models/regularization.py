@@ -1,21 +1,22 @@
 from datetime import datetime
 from models import db
 
-class RegularizationRequest(db.Model):
-    __tablename__ = 'regularization_requests'
-    request_id = db.Column(db.Integer, primary_key=True)
+class AttendanceRegularization(db.Model):
+    __tablename__ = 'attendance_regularizations'
+    id = db.Column(db.Integer, primary_key=True)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
-    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
-    attendance_id = db.Column(db.Integer, db.ForeignKey('attendance_logs.attendance_id'), nullable=True)
-    request_date = db.Column(db.Date, default=datetime.utcnow, nullable=False)
-    reason = db.Column(db.String(300))
-    requested_punch_in = db.Column(db.DateTime)
-    requested_punch_out = db.Column(db.DateTime)
-    status = db.Column(db.String(20), default='Pending') # Pending/Approved/Rejected
-    approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    attendance_date = db.Column(db.Date, nullable=False)
+    reason = db.Column(db.Text, nullable=False)
+    requested_login_at = db.Column(db.DateTime, nullable=True)
+    requested_logout_at = db.Column(db.DateTime, nullable=True)
+    requested_status = db.Column(db.String(20), nullable=True)
+    status = db.Column(db.String(20), default='PENDING') # PENDING / APPROVED / REJECTED
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    review_comment = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    employee = db.relationship('Employee', foreign_keys=[employee_id], backref='regularization_requests')
-    attendance = db.relationship('Attendance', backref='regularization_requests')
-    approver = db.relationship('Employee', foreign_keys=[approved_by])
-
-    # Check constraint logic is handled at application level or DB migration level
+    company = db.relationship('Company', backref='regularization_requests')
+    user = db.relationship('User', foreign_keys=[user_id], backref='regularization_requests')
+    reviewer = db.relationship('User', foreign_keys=[reviewed_by])
