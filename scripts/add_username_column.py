@@ -26,10 +26,13 @@ def add_missing_columns():
         cursor.execute("ALTER TABLE users ADD COLUMN username VARCHAR(50)")
         print("✅ Added 'username' column")
     
-    if 'company_code' not in columns:
-        print("Adding 'company_code' column...")
-        cursor.execute("ALTER TABLE users ADD COLUMN company_code VARCHAR(20)")
-        print("✅ Added 'company_code' column")
+    if 'company_code' in columns:
+        print("\nRemoving 'company_code' from users table...")
+        try:
+            cursor.execute("ALTER TABLE users DROP COLUMN company_code")
+            print("✅ Removed 'company_code' from users table")
+        except Exception as e:
+            print(f"⚠️  Could not remove 'company_code' from users: {e}")
     
     # Check companies table
     cursor.execute("PRAGMA table_info(companies)")
@@ -42,8 +45,13 @@ def add_missing_columns():
     
     if 'timezone' not in columns:
         print("\nAdding 'timezone' to companies table...")
-        cursor.execute("ALTER TABLE companies ADD COLUMN timezone VARCHAR(50) DEFAULT 'UTC'")
+        cursor.execute("ALTER TABLE companies ADD COLUMN timezone VARCHAR(50) DEFAULT 'Asia/Kolkata'")
         print("✅ Added 'timezone' to companies table")
+    
+    if 'subdomain' not in columns:
+        print("\nAdding 'subdomain' to companies table...")
+        cursor.execute("ALTER TABLE companies ADD COLUMN subdomain VARCHAR(100)")
+        print("✅ Added 'subdomain' to companies table")
     
     conn.commit()
     conn.close()

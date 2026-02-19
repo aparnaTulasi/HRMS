@@ -16,16 +16,32 @@ def clean_employees_table():
     cursor = conn.cursor()
 
     try:
-        # 1. Delete all data from employees table
-        print("🧹 Deleting all records from 'employees' table...")
-        cursor.execute("DELETE FROM employees")
-        
-        # 2. Reset the auto-increment ID
-        print("🔄 Resetting 'employees' ID sequence...")
-        cursor.execute("DELETE FROM sqlite_sequence WHERE name='employees'")
+        # List of tables to clear (Child tables first to avoid FK issues)
+        tables_to_clear = [
+            'employee_address',
+            'employee_bank_details',
+            'employee_documents',
+            'attendance',
+            'leaves',
+            'leave_balances',
+            'payslip_earnings',
+            'payslip_deductions',
+            'payslip_employer_contributions',
+            'payslip_reimbursements',
+            'payslips',
+            'employees'
+        ]
+
+        for table in tables_to_clear:
+            try:
+                print(f"🧹 Deleting from '{table}'...")
+                cursor.execute(f"DELETE FROM {table}")
+                cursor.execute(f"DELETE FROM sqlite_sequence WHERE name='{table}'")
+            except sqlite3.OperationalError:
+                pass # Table might not exist
         
         conn.commit()
-        print("✅ Employees table cleaned successfully!")
+        print("✅ Employees and related data cleaned successfully!")
 
     except Exception as e:
         print(f"❌ Error: {e}")

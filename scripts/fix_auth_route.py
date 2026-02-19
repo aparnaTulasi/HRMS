@@ -1,6 +1,6 @@
 import os
 
-auth_content = """from flask import Blueprint, request, jsonifrom flask import Blueprint, request, jsonify, current_app, session
+auth_content = """from flask import Blueprint, request, jsonify, current_app, session
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
 import jwt

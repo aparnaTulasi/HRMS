@@ -15,9 +15,18 @@ def reset_database():
         # Backup old database
         backup_path = f'{db_path}.backup'
         if os.path.exists(backup_path):
-            os.remove(backup_path)
-        os.rename(db_path, backup_path)
-        print(f"✅ Old database backed up to: {backup_path}")
+            try:
+                os.remove(backup_path)
+            except PermissionError:
+                print(f"❌ Error: Could not remove old backup '{backup_path}'. Is it open?")
+                return
+        try:
+            os.rename(db_path, backup_path)
+            print(f"✅ Old database backed up to: {backup_path}")
+        except PermissionError:
+            print(f"❌ Error: The database file '{db_path}' is currently locked.")
+            print("👉 Please STOP the running Flask server (Ctrl+C in your terminal) and try again.")
+            return
     
     # Create new database with correct schema
     conn = sqlite3.connect(db_path)
@@ -62,14 +71,23 @@ def reset_database():
             id INTEGER PRIMARY KEY,
             user_id INTEGER UNIQUE NOT NULL,
             company_id INTEGER NOT NULL,
-            first_name VARCHAR(50),
-            last_name VARCHAR(50),
-            phone VARCHAR(20),
-            email VARCHAR(120),
+            full_name VARCHAR(100),
+            personal_email VARCHAR(120),
+            company_email VARCHAR(120),
             department VARCHAR(50),
             designation VARCHAR(50),
-            date_of_joining VARCHAR(20),
-            salary VARCHAR(60),
+            pay_grade VARCHAR(50),
+            ctc FLOAT,
+            phone_number VARCHAR(20),
+            mobile_number VARCHAR(20),
+            date_of_joining DATE,
+            gender VARCHAR(10),
+            date_of_birth DATE,
+            aadhaar_number VARCHAR(20),
+            pan_number VARCHAR(20),
+            education_details TEXT,
+            last_work_details TEXT,
+            statutory_details TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id),

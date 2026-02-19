@@ -2,11 +2,12 @@ import sqlite3
 import os
 
 # Path to database
-DB_PATH = os.path.join("instance", "hrms.db")
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(base_dir, "instance", "hrms.db")
 
 def migrate():
     if not os.path.exists(DB_PATH):
-        print("❌ Database file not found. Run 'python app.py' first to create it.")
+        print(f"❌ Database file not found at {DB_PATH}. Run 'python app.py' first to create it.")
         return
 
     conn = sqlite3.connect(DB_PATH)
@@ -16,17 +17,23 @@ def migrate():
     
     # Columns to ensure exist in employees
     new_columns = {
-        "father_or_husband_name": "TEXT",
-        "mother_name": "TEXT",
+        "full_name": "TEXT",
+        "gender": "TEXT",
+        "date_of_birth": "DATE",
+        "department": "TEXT",
+        "designation": "TEXT",
+        "phone_number": "TEXT",
+        "mobile_number": "TEXT",
+        "ctc": "FLOAT",
+        "pay_grade": "TEXT",
         "personal_email": "TEXT",
-        "personal_mobile": "TEXT",
         "company_email": "TEXT",
-        "work_phone": "TEXT",
-        "work_mode": "TEXT",
-        "branch_id": "INTEGER",
         "aadhaar_number": "TEXT",
         "pan_number": "TEXT",
-        "salary": "FLOAT"
+        "education_details": "TEXT",
+        "last_work_details": "TEXT",
+        "statutory_details": "TEXT",
+
     }
 
     # Get existing columns

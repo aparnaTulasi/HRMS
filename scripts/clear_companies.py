@@ -14,9 +14,9 @@ def clear_companies_data():
     print("⚠️  Cleaning up Companies data...")
     
     try:
-        # 1. Unlink Users from Companies (Set company_id to NULL)
-        print("   - Unlinking users from companies...")
-        cursor.execute("UPDATE users SET company_id = NULL")
+        # 1. Delete Users linked to Companies (So emails can be reused)
+        print("   - Deleting users linked to companies...")
+        cursor.execute("DELETE FROM users WHERE company_id IS NOT NULL")
         
         # 2. Delete Employees (Employees cannot exist without a company)
         # We need to find employees to delete their related data first

@@ -1,21 +1,25 @@
 import sqlite3
+import os
 
-DB_PATH = "instance/hrms.db"   # update only if your db path is different
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "instance", "hrms.db")
 
 # Columns your current Employee model expects (from your error)
 COLUMNS_TO_ADD = [
-    ("manager_id", "INTEGER"),
-    ("employment_type", "TEXT"),
-    ("salary", "REAL"),
+    ("department", "TEXT"),
+    ("designation", "TEXT"),
     ("company_email", "TEXT"),
-    ("work_mode", "TEXT"),
-    ("branch_id", "INTEGER"),
     ("education_details", "TEXT"),
     ("last_work_details", "TEXT"),
     ("statutory_details", "TEXT"),
-    ("father_or_husband_name", "TEXT"),
-    ("mother_name", "TEXT"),
-    ("company_code", "TEXT"),
+    ("full_name", "TEXT"),
+    ("gender", "TEXT"),
+    ("date_of_birth", "DATE"),
+    ("phone_number", "TEXT"),
+    ("personal_email", "TEXT"),
+    ("mobile_number", "TEXT"),
+    ("ctc", "REAL"),
+    ("pay_grade", "TEXT"),
 ]
 
 def get_existing_columns(cur):
@@ -23,6 +27,10 @@ def get_existing_columns(cur):
     return {row[1] for row in cur.fetchall()}  # row[1] = column name
 
 def main():
+    if not os.path.exists(DB_PATH):
+        print(f"❌ Database not found at: {DB_PATH}")
+        return
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 

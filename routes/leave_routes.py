@@ -65,6 +65,8 @@ from routes.urls import urls_bp
 from routes.permissions import permissions_bp
 from routes.documents import documents_bp
 from leave.routes import leave_bp
+ from routes.payroll import payroll_bp
+from routes.profile_routes import profile_bp
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -78,6 +80,8 @@ app.register_blueprint(urls_bp, url_prefix='/api/urls')
 app.register_blueprint(permissions_bp, url_prefix='/api/permissions')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')
 app.register_blueprint(leave_bp)
+app.register_blueprint(payroll_bp, url_prefix='/api/payroll')
+app.register_blueprint(profile_bp)
 
 @app.route('/')
 def home():

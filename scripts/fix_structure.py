@@ -92,12 +92,13 @@ def register():
     db.session.flush()
     
     if role != 'SUPER_ADMIN' and company:
+        full_name = f"{data.get('first_name', '')} {data.get('last_name', '')}".strip()
         new_employee = Employee(
             user_id=new_user.id, company_id=company.id,
-            first_name=data.get('first_name'), last_name=data.get('last_name'),
+            full_name=full_name,
             phone=data.get('phone'), department=data.get('department', role),
             designation=data.get('designation', role), date_of_joining=data.get('date_of_joining'),
-            Salary=data.get('salary')
+            salary=data.get('salary')
         )
         db.session.add(new_employee)
 
@@ -154,6 +155,8 @@ def check_status():
 """
 
 routes_admin = """from flask import Blueprint, jsonify, request, g
+from werkzeug.security import generate_password_hash
+from sqlalchemy.exc import IntegrityError
 from models import db
 from models.user import User
 from models.employee import Employee
@@ -170,7 +173,8 @@ def get_employees():
     output = []
     for emp in employees:
         user = User.query.get(emp.user_id)
-        output.append({'id': emp.id, 'user_id': emp.user_id, 'first_name': emp.first_name, 'last_name': emp.last_name, 'email': user.email, 'status': user.status, 'department': emp.department, 'designation': emp.designation})
+        if user:
+            output.append({'id': emp.id, 'user_id': emp.user_id, 'full_name': emp.full_name, 'email': user.email, 'status': user.status, 'department': emp.department, 'designation': emp.designation})
     return jsonify({'employees': output})
 
 @admin_bp.route('/pending-employees', methods=['GET'])
@@ -182,7 +186,7 @@ def get_pending_employees():
     for user in users:
         emp = Employee.query.filter_by(user_id=user.id).first()
         if emp:
-            output.append({'user_id': user.id, 'first_name': emp.first_name, 'last_name': emp.last_name, 'email': user.email, 'department': emp.department, 'designation': emp.designation, 'date_of_joining': emp.date_of_joining})
+            output.append({'user_id': user.id, 'full_name': emp.full_name, 'email': user.email, 'department': emp.department, 'designation': emp.designation, 'date_of_joining': emp.date_of_joining.strftime('%Y-%m-%d') if emp.date_of_joining else None})
     return jsonify({'pending_employees': output})
 
 @admin_bp.route('/approve-employee/<int:user_id>', methods=['POST'])
@@ -195,6 +199,62 @@ def approve_employee(user_id):
     user.status = 'ACTIVE'
     db.session.commit()
     return jsonify({'message': 'Employee approved successfully', 'status': 'ACTIVE'})
+
+@admin_bp.route('/create-manager', methods=['POST'])
+@token_required
+@role_required(['ADMIN'])
+def create_manager():
+    data = request.get_json()
+    required_fields = ['company_email', 'password', 'full_name', 'company_id']
+    if not all(k in data for k in required_fields):
+        return jsonify({'message': f'Missing one or more required fields: {required_fields}'}), 400
+
+    if g.user.company_id != int(data['company_id']):
+        return jsonify({'message': 'Admins can only create managers for their own company.'}), 403
+
+    if User.query.filter_by(email=data['company_email']).first():
+        return jsonify({'message': 'A user with this company email already exists.'}), 409
+
+    company = Company.query.get(g.user.company_id)
+    if not company:
+        return jsonify({'message': 'Company not found for the current admin.'}), 404
+
+    try:
+        hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        new_user = User(
+            email=data['company_email'],
+            password=hashed_password,
+            role=data.get('department', 'MANAGER'),
+            company_id=company.id,
+            status='ACTIVE'
+        )
+        db.session.add(new_user)
+        db.session.flush()
+
+        new_employee = Employee(
+            user_id=new_user.id,
+            company_id=company.id,
+            full_name=data.get('full_name', '').strip(),
+            personal_email=data.get('personal_email'),
+            phone=data.get('phone_number'),
+            department=data.get('department'),
+            designation=data.get('designation'),
+            salary=data.get('ctc')
+        )
+        db.session.add(new_employee)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Manager created successfully.',
+            'user_id': new_user.id,
+            'employee_id': new_employee.id
+        }), 201
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({'message': 'Database integrity error. A similar record might already exist.'}), 409
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': 'An unexpected error occurred while creating the manager.', 'error': str(e)}), 500
 """
 
 routes_superadmin = """from flask import Blueprint, request, jsonify
@@ -226,7 +286,8 @@ def create_company():
     db.session.add(new_admin)
     db.session.flush()
     
-    admin_emp = Employee(user_id=new_admin.id, company_id=new_company.id, first_name=data.get('admin_first_name', 'Admin'), last_name=data.get('admin_last_name', 'User'), department='Management', designation='Administrator')
+    admin_full_name = f"{data.get('admin_first_name', 'Admin')} {data.get('admin_last_name', 'User')}".strip()
+    admin_emp = Employee(user_id=new_admin.id, company_id=new_company.id, full_name=admin_full_name, department='Management', designation='Administrator')
     db.session.add(admin_emp)
     
     try:
@@ -265,7 +326,7 @@ def get_employees():
     output = []
     for emp in employees:
         user = User.query.get(emp.user_id)
-        output.append({'id': emp.id, 'first_name': emp.first_name, 'last_name': emp.last_name, 'email': user.email, 'status': user.status, 'department': emp.department, 'designation': emp.designation})
+        output.append({'id': emp.id, 'full_name': emp.full_name, 'email': user.email, 'status': user.status, 'department': emp.department, 'designation': emp.designation})
     return jsonify({'employees': output})
 
 @hr_bp.route('/approve-employee/<int:user_id>', methods=['POST'])
@@ -298,14 +359,14 @@ def check_registration():
     user = User.query.filter_by(email=email).first()
     if not user: return jsonify({'message': 'No registration found'}), 404
     emp = Employee.query.filter_by(user_id=user.id).first()
-    return jsonify({'email': user.email, 'status': user.status, 'name': f"{emp.first_name} {emp.last_name}" if emp else None, 'role': user.role})
+    return jsonify({'email': user.email, 'status': user.status, 'name': emp.full_name if emp else None, 'role': user.role})
 
 @employee_bp.route('/profile', methods=['GET'])
 @token_required
 def get_profile():
     emp = Employee.query.filter_by(user_id=g.user.id).first()
     if not emp: return jsonify({'message': 'Profile not found'}), 404
-    return jsonify({'id': emp.id, 'first_name': emp.first_name, 'last_name': emp.last_name, 'department': emp.department, 'designation': emp.designation, 'phone': emp.phone, 'date_of_joining': emp.date_of_joining})
+    return jsonify({'id': emp.id, 'full_name': emp.full_name, 'department': emp.department, 'designation': emp.designation, 'phone': emp.phone, 'date_of_joining': emp.date_of_joining})
 
 @employee_bp.route('/bank', methods=['GET'])
 @token_required
@@ -408,7 +469,7 @@ employee_advanced_bp = Blueprint('employee_advanced', __name__)
 def filter_employees():
     if g.user.role == 'EMPLOYEE':
         emp = Employee.query.filter_by(user_id=g.user.id).first()
-        return jsonify({'employees': [{'id': emp.id, 'first_name': emp.first_name, 'last_name': emp.last_name, 'email': g.user.email, 'department': emp.department, 'designation': emp.designation, 'status': emp.employee_status}], 'count': 1})
+        return jsonify({'employees': [{'id': emp.id, 'full_name': emp.full_name, 'email': g.user.email, 'department': emp.department, 'designation': emp.designation, 'status': emp.employee_status}], 'count': 1})
     
     data = request.get_json()
     filters = data.get('filters', {})
@@ -422,7 +483,7 @@ def filter_employees():
     output = []
     for emp in employees:
         user = User.query.get(emp.user_id)
-        output.append({'id': emp.id, 'first_name': emp.first_name, 'last_name': emp.last_name, 'email': user.email if user else None, 'department': emp.department, 'designation': emp.designation, 'status': emp.employee_status})
+        output.append({'id': emp.id, 'full_name': emp.full_name, 'email': user.email if user else None, 'department': emp.department, 'designation': emp.designation, 'status': emp.employee_status})
     return jsonify({'employees': output, 'count': len(output)})
 
 @employee_advanced_bp.route('/departments', methods=['GET'])

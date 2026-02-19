@@ -65,6 +65,8 @@ from routes.urls import urls_bp
 from routes.permissions import permissions_bp
 from routes.documents import documents_bp
 from leave.routes import leave_bp
+ from routes.payroll import payroll_bp
+from routes.profile_routes import profile_bp
 
 # Register blueprints
 app.register_blueprint(auth_bp, url_prefix='/api/auth')
@@ -77,7 +79,9 @@ app.register_blueprint(employee_advanced_bp, url_prefix='/api/employee')
 app.register_blueprint(urls_bp, url_prefix='/api/urls')
 app.register_blueprint(permissions_bp, url_prefix='/api/permissions')
 app.register_blueprint(documents_bp, url_prefix='/api/documents')
+app.register_blueprint(payroll_bp, url_prefix='/api/payroll')
 app.register_blueprint(leave_bp)
+app.register_blueprint(profile_bp)
 
 @app.route('/')
 def home():
@@ -111,21 +115,24 @@ models_init_py_content = "from flask_sqlalchemy import SQLAlchemy\ndb = SQLAlche
 
 models_user_py_content = """
 from datetime import datetime, timedelta
-from flask_login import UserMixin
 from models import db
 import secrets
 
-class User(UserMixin, db.Model):
+class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(120), unique=True, nullable=False)
     password = db.Column(db.String(255), nullable=False)
+    phone = db.Column(db.String(20), nullable=True)
     role = db.Column(db.String(20), nullable=False)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=True)
     status = db.Column(db.String(20), default='ACTIVE')
     portal_prefix = db.Column(db.String(50), nullable=True)
+    profile_completed = db.Column(db.Boolean, default=False)
+    profile_locked = db.Column(db.Boolean, default=False)
     otp = db.Column(db.String(6), nullable=True)
     otp_expiry = db.Column(db.DateTime, nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     employee_profile = db.relationship('Employee', backref='user', uselist=False, lazy=True)
@@ -190,12 +197,19 @@ class Employee(db.Model):
     personal_email = db.Column(db.String(120))
     aadhaar_number = db.Column(db.String(20), unique=True)
     pan_number = db.Column(db.String(20), unique=True)
+    employeement_type = db.Column(db.String(50))
+    manager_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     bank_details = db.relationship('EmployeeBankDetails', backref='employee', uselist=False, lazy=True)
     address = db.relationship('EmployeeAddress', backref='employee', uselist=False, lazy=True)
     documents = db.relationship('EmployeeDocument', backref='employee', lazy=True)
     attendance_records = db.relationship('Attendance', backref='employee', lazy=True)
+    manager = db.relationship('Employee', remote_side=[id], backref='subordinates')
+
+    education_details = db.Column(db.JSON, nullable=True)
+    last_work_details = db.Column(db.JSON, nullable=True)
+    statutory_details = db.Column(db.JSON, nullable=True)
 
     @property
     def full_name(self):
@@ -361,6 +375,211 @@ class DocumentType(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 """
 
+models_payroll_py_content = """
+from datetime import datetime
+from models import db
+
+class PayGrade(db.Model):
+    __tablename__ = 'pay_grades'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    grade_name = db.Column(db.String(100), nullable=False)
+    min_salary = db.Column(db.Float, default=0.0)
+    max_salary = db.Column(db.Float, default=0.0)
+    basic_pct = db.Column(db.Float, default=0.0)
+    hra_pct = db.Column(db.Float, default=0.0)
+    ta_pct = db.Column(db.Float, default=0.0)
+    medical_pct = db.Column(db.Float, default=0.0)
+    is_active = db.Column(db.Boolean, default=True)
+
+class PayRole(db.Model):
+    __tablename__ = 'pay_roles'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    pay_grade_id = db.Column(db.Integer, db.ForeignKey('pay_grades.id'))
+    is_active = db.Column(db.Boolean, default=True)
+
+class Payslip(db.Model):
+    __tablename__ = 'payslips'
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    pay_month = db.Column(db.Integer, nullable=False)
+    pay_year = db.Column(db.Integer, nullable=False)
+    pay_date = db.Column(db.Date)
+    total_days = db.Column(db.Integer, default=30)
+    paid_days = db.Column(db.Integer, default=30)
+    lwp_days = db.Column(db.Integer, default=0)
+    gross_salary = db.Column(db.Float, default=0.0)
+    total_deductions = db.Column(db.Float, default=0.0)
+    total_reimbursements = db.Column(db.Float, default=0.0)
+    net_salary = db.Column(db.Float, default=0.0)
+    annual_ctc = db.Column(db.Float, default=0.0)
+    monthly_ctc = db.Column(db.Float, default=0.0)
+    tax_regime = db.Column(db.String(20), default="OLD")
+    section_80c = db.Column(db.Float, default=0.0)
+    monthly_rent = db.Column(db.Float, default=0.0)
+    city_type = db.Column(db.String(20), default="NON_METRO")
+    other_deductions = db.Column(db.Float, default=0.0)
+    calculated_tds = db.Column(db.Float, default=0.0)
+    bank_account_no = db.Column(db.String(50))
+    uan_no = db.Column(db.String(50))
+    esi_account_no = db.Column(db.String(50))
+    status = db.Column(db.String(20), default="DRAFT")
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_deleted = db.Column(db.Boolean, default=False)
+    pdf_path = db.Column(db.String(255))
+
+    earnings = db.relationship('PayslipEarning', backref='payslip', lazy=True, cascade="all, delete-orphan")
+    deductions = db.relationship('PayslipDeduction', backref='payslip', lazy=True, cascade="all, delete-orphan")
+    employer_contribs = db.relationship('PayslipEmployerContribution', backref='payslip', lazy=True, cascade="all, delete-orphan")
+    reimbursements = db.relationship('PayslipReimbursement', backref='payslip', lazy=True, cascade="all, delete-orphan")
+
+class PayslipEarning(db.Model):
+    __tablename__ = 'payslip_earnings'
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey('payslips.id'), nullable=False)
+    component = db.Column(db.String(100))
+    amount = db.Column(db.Float, default=0.0)
+
+class PayslipDeduction(db.Model):
+    __tablename__ = 'payslip_deductions'
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey('payslips.id'), nullable=False)
+    component = db.Column(db.String(100))
+    amount = db.Column(db.Float, default=0.0)
+
+class PayslipEmployerContribution(db.Model):
+    __tablename__ = 'payslip_employer_contributions'
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey('payslips.id'), nullable=False)
+    component = db.Column(db.String(100))
+    amount = db.Column(db.Float, default=0.0)
+
+class PayslipReimbursement(db.Model):
+    __tablename__ = 'payslip_reimbursements'
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey('payslips.id'), nullable=False)
+    component = db.Column(db.String(100))
+    amount = db.Column(db.Float, default=0.0)
+"""
+
+routes_payroll_py_content = """
+from datetime import datetime
+from flask import Blueprint, request, jsonify, g, send_file
+from models import db
+from utils.decorators import token_required
+# from utils.payslip_pdf import generate_payslip_pdf # Uncomment when PDF util is ready
+
+from models.payroll import (
+    PayGrade, PayRole, Payslip,
+    PayslipEarning, PayslipDeduction, PayslipEmployerContribution, PayslipReimbursement
+)
+
+payroll_bp = Blueprint("payroll", __name__)
+
+def _company_id():
+    return g.user.company_id
+
+def _employee_db_id():
+    if hasattr(g.user, "employee_profile") and g.user.employee_profile:
+        return g.user.employee_profile.id
+    return None
+
+def _is_owner_employee(payslip):
+    emp_id = _employee_db_id()
+    return g.user.role == "EMPLOYEE" and emp_id == payslip.employee_id
+
+def _replace_items(model, payslip_id, items):
+    model.query.filter_by(payslip_id=payslip_id).delete()
+    for it in items:
+        component = (it.get("component") or "").strip()
+        amount = float(it.get("amount", 0) or 0)
+        if component:
+            db.session.add(model(payslip_id=payslip_id, component=component, amount=amount))
+
+@payroll_bp.route("/payslips", methods=["GET"])
+@token_required
+def list_payslips():
+    if g.user.role not in ['ADMIN', 'HR']: return jsonify({"message": "Unauthorized"}), 403
+    employee_id = request.args.get("employee_id", type=int)
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+
+    q = Payslip.query.filter_by(company_id=_company_id(), is_deleted=False)
+    if employee_id: q = q.filter_by(employee_id=employee_id)
+    if month: q = q.filter_by(pay_month=month)
+    if year: q = q.filter_by(pay_year=year)
+
+    rows = q.order_by(Payslip.id.desc()).all()
+    return jsonify({"success": True, "data": [{
+        "id": p.id, "employee_id": p.employee_id, "pay_month": p.pay_month, "pay_year": p.pay_year,
+        "net_salary": p.net_salary, "status": p.status
+    } for p in rows]})
+
+@payroll_bp.route("/payslips", methods=["POST"])
+@token_required
+def create_payslip():
+    if g.user.role not in ['ADMIN', 'HR']: return jsonify({"message": "Unauthorized"}), 403
+    data = request.get_json() or {}
+
+    p = Payslip(
+        company_id=_company_id(),
+        employee_id=int(data["employee_id"]),
+        pay_month=int(data["pay_month"]),
+        pay_year=int(data["pay_year"]),
+        total_days=int(data.get("total_days", 0)),
+        paid_days=int(data.get("paid_days", 0)),
+        lwp_days=int(data.get("lwp_days", 0)),
+        gross_salary=float(data.get("gross_salary", 0)),
+        total_deductions=float(data.get("total_deductions", 0)),
+        net_salary=float(data.get("net_salary", 0)),
+        annual_ctc=float(data.get("annual_ctc", 0)),
+        monthly_ctc=float(data.get("monthly_ctc", 0)),
+        tax_regime=data.get("tax_regime", "OLD"),
+        status=data.get("status", "DRAFT"),
+        created_by=g.user.id
+    )
+    if data.get("pay_date"):
+        p.pay_date = datetime.strptime(data["pay_date"], "%Y-%m-%d").date()
+
+    db.session.add(p)
+    db.session.flush()
+
+    _replace_items(PayslipEarning, p.id, data.get("earnings", []))
+    _replace_items(PayslipDeduction, p.id, data.get("deductions", []))
+    _replace_items(PayslipEmployerContribution, p.id, data.get("employer_contribs", []))
+
+    db.session.commit()
+    return jsonify({"success": True, "message": "Payslip created", "id": p.id})
+
+@payroll_bp.route("/payslips/<int:payslip_id>", methods=["PUT"])
+@token_required
+def update_payslip(payslip_id):
+    if g.user.role not in ['ADMIN', 'HR']: return jsonify({"message": "Unauthorized"}), 403
+    data = request.get_json() or {}
+    p = Payslip.query.filter_by(id=payslip_id, company_id=_company_id()).first()
+    if not p: return jsonify({"message": "Not found"}), 404
+
+    if "status" in data: p.status = data["status"]
+    if "net_salary" in data: p.net_salary = data["net_salary"]
+    
+    if "earnings" in data: _replace_items(PayslipEarning, p.id, data["earnings"])
+    if "deductions" in data: _replace_items(PayslipDeduction, p.id, data["deductions"])
+    
+    db.session.commit()
+    return jsonify({"success": True, "message": "Payslip updated"})
+
+@payroll_bp.route("/my-payslips", methods=["GET"])
+@token_required
+def my_payslips():
+    emp_id = _employee_db_id()
+    rows = Payslip.query.filter_by(company_id=_company_id(), employee_id=emp_id, status="PUBLISHED").all()
+    return jsonify({"success": True, "data": [{"id": p.id, "month": p.pay_month, "net": p.net_salary} for p in rows]})
+"""
+
 routes_auth_py_content = """
 from flask import Blueprint, request, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -402,18 +621,151 @@ def login():
 """
 
 routes_admin_py_content = """
-from flask import Blueprint, jsonify, g
+from flask import Blueprint, jsonify, request, g
+from werkzeug.security import generate_password_hash
+from datetime import datetime
+from models import db
+from models.user import User
+from models.company import Company
 from utils.decorators import token_required, role_required
 from models.employee import Employee
+from utils.email_utils import send_account_created_alert, send_login_credentials
+from utils.url_generator import generate_login_url
+# from models.employee_onboarding_request import EmployeeOnboardingRequest # Uncomment if model exists
 
 admin_bp = Blueprint('admin', __name__)
 
 @admin_bp.route('/employees', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
 def get_employees():
-    employees = Employee.query.filter_by(company_id=g.user.company_id).all()
+    if g.user.role == 'SUPER_ADMIN':
+        employees = Employee.query.all()
+    else:
+        employees = Employee.query.filter_by(company_id=g.user.company_id).all()
     return jsonify([{'id': emp.id, 'name': emp.full_name} for emp in employees])
+
+@admin_bp.route('/create-hr', methods=['POST'])
+@token_required
+@role_required(['ADMIN', 'SUPER_ADMIN'])
+def create_hr():
+    data = request.get_json(force=True)
+    email = data.get('email') or data.get('company_email')
+    personal_email = data.get('personal_email')
+    if not email or not data.get('password'):
+        return jsonify({'message': 'Email and Password are required'}), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({'message': 'Email already exists'}), 409
+
+    company_id = g.user.company_id
+    if g.user.role == 'SUPER_ADMIN':
+        company_id = data.get('company_id')
+        if not company_id:
+            return jsonify({'message': 'Company ID required for Super Admin'}), 400
+
+    company = Company.query.get(company_id)
+    if not company:
+        return jsonify({'message': 'Company not found'}), 404
+
+    hashed_password = generate_password_hash(data['password'])
+    new_user = User(email=email, password=hashed_password, role='HR', company_id=company_id)
+    db.session.add(new_user)
+    db.session.flush()
+
+    emp_count = Employee.query.filter_by(company_id=company_id).count()
+    emp_code = f"{company.company_code}-{emp_count + 1:04d}"
+
+    new_employee = Employee(
+        user_id=new_user.id,
+        company_id=company_id,
+        employee_id=emp_code,
+        full_name=data.get('full_name'),
+        company_email=email,
+        personal_email=personal_email,
+        department=data.get('department', 'Human Resources'),
+        designation=data.get('designation', 'HR Manager')
+    )
+    db.session.add(new_employee)
+    db.session.commit()
+    return jsonify({'message': 'HR created successfully'}), 201
+
+@admin_bp.route('/create-employee', methods=['POST'])
+@token_required
+@role_required(['ADMIN', 'HR'])
+def create_employee():
+    data = request.get_json(force=True)
+    email = data.get('email') or data.get('company_email')
+    if not email: return jsonify({'message': 'Email required'}), 400
+    
+    if User.query.filter_by(email=email).first():
+        return jsonify({'message': 'Email already exists'}), 409
+        
+    hashed_password = generate_password_hash(data.get('password', 'Password@123'))
+    user = User(email=email, password=hashed_password, role='EMPLOYEE', company_id=g.user.company_id, status='ACTIVE')
+    db.session.add(user)
+    db.session.flush()
+
+    company = Company.query.get(g.user.company_id)
+    emp_count = Employee.query.filter_by(company_id=g.user.company_id).count()
+    emp_code = f"{company.company_code}-{emp_count + 1:04d}"
+
+    emp = Employee(
+        user_id=user.id,
+        company_id=g.user.company_id,
+        employee_id=emp_code,
+        full_name=data.get('full_name'),
+        personal_email=data.get('personal_email'),
+        department=data.get('department'),
+        designation=data.get('designation')
+    )
+    db.session.add(emp)
+    db.session.commit()
+    return jsonify({'message': 'Employee created successfully'}), 201
+
+@admin_bp.route('/employees/<int:emp_id>', methods=['GET'])
+@token_required
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+def get_employee(emp_id):
+    if g.user.role == 'SUPER_ADMIN':
+        emp = Employee.query.filter_by(id=emp_id).first()
+    else:
+        emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    
+    if not emp: return jsonify({"message":"Employee not found"}), 404
+    
+    return jsonify({
+        "id": emp.id,
+        "employee_id": emp.employee_id,
+        "full_name": emp.full_name,
+        "education_details": emp.education_details,
+        "last_work_details": emp.last_work_details,
+        "statutory_details": emp.statutory_details
+    })
+
+@admin_bp.route('/employees/<int:emp_id>', methods=['PUT'])
+@token_required
+@role_required(['ADMIN','HR', 'SUPER_ADMIN'])
+def update_employee(emp_id):
+    emp = Employee.query.filter_by(id=emp_id).first()
+    if not emp: return jsonify({"message":"Employee not found"}), 404
+    
+    data = request.get_json(force=True)
+    for k, v in data.items():
+        if hasattr(emp, k): setattr(emp, k, v)
+    
+    db.session.commit()
+    return jsonify({"message":"Employee updated"}), 200
+
+@admin_bp.route('/employees/<int:emp_id>/education', methods=['POST'])
+@token_required
+@role_required(['ADMIN','HR'])
+def save_education(emp_id):
+    emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    if not emp: return jsonify({"message":"Employee not found"}), 404
+    emp.education_details = request.get_json(force=True)
+    db.session.commit()
+    return jsonify({"message":"Education saved"}), 200
 """
 
 routes_superadmin_py_content = """
@@ -496,10 +848,13 @@ from models.employee import Employee
 from models.employee_bank import EmployeeBankDetails
 from models.employee_address import EmployeeAddress
 from models.employee_documents import EmployeeDocument
-from utils.decorators import token_required
+from models.user import User
+from utils.decorators import token_required, role_required
 import os
 from config import Config
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash
+from datetime import datetime
 
 employee_bp = Blueprint('employee', __name__)
 
@@ -511,15 +866,60 @@ def get_profile():
         return jsonify({'message': 'Profile not found'}), 404
     return jsonify({
         'id': emp.id,
+        'employee_id': emp.employee_id,
         'first_name': emp.first_name,
         'last_name': emp.last_name,
+        'email': emp.company_email,
         'department': emp.department,
         'designation': emp.designation,
         'phone': getattr(emp, 'work_phone', None),
         'date_of_joining': emp.date_of_joining.isoformat() if emp.date_of_joining else None
+        'education_details': emp.education_details,
+        'last_work_details': emp.last_work_details,
+        'statutory_details': emp.statutory_details
     })
 
-# Other employee routes like /bank, /address etc. would go here
+@employee_bp.route('/address', methods=['POST'])
+@token_required
+def add_address():
+    data = request.get_json()
+    emp_id = data.get('employee_id') if g.user.role in ['ADMIN', 'HR'] else g.user.employee_profile.id
+    if not emp_id: return jsonify({'message': 'Employee ID required'}), 400
+
+    emp = Employee.query.get(emp_id)
+    if not emp: return jsonify({'message': 'Employee not found'}), 404
+
+    address = EmployeeAddress.query.filter_by(employee_id=emp_id).first()
+    if not address:
+        address = EmployeeAddress(employee_id=emp_id)
+        db.session.add(address)
+        
+    address.address_line1 = data.get('address_line1')
+    address.permanent_address = data.get('permanent_address')
+    address.city = data.get('city')
+    address.state = data.get('state')
+    address.zip_code = data.get('zip_code')
+    
+    db.session.commit()
+    return jsonify({'message': 'Address updated successfully'})
+
+@employee_bp.route('/bank', methods=['POST'])
+@token_required
+def add_bank_details():
+    data = request.get_json()
+    emp_id = data.get('employee_id') if g.user.role in ['ADMIN', 'HR'] else g.user.employee_profile.id
+    if not emp_id: return jsonify({'message': 'Employee ID required'}), 400
+    
+    bank = EmployeeBankDetails.query.filter_by(employee_id=emp_id).first() or EmployeeBankDetails(employee_id=emp_id)
+    if not bank.id: db.session.add(bank)
+    
+    bank.bank_name = data.get('bank_name')
+    bank.account_number = data.get('account_number')
+    bank.ifsc_code = data.get('ifsc_code')
+    bank.branch_name = data.get('branch_name')
+    
+    db.session.commit()
+    return jsonify({'message': 'Bank details updated successfully'})
 """
 
 routes_attendance_py_content = """
@@ -649,20 +1049,26 @@ class LeaveBalance(db.Model):
 
 leave_routes_py_content = """
 from flask import request, jsonify
-from flask_login import login_required, current_user
+from jwt_auth import jwt_required, get_current_user
 from . import leave_bp
 from .models import Leave
 from models import db
+from datetime import datetime
 
 @leave_bp.route('/apply', methods=['POST'])
-@login_required
+@jwt_required
 def apply_leave():
     data = request.get_json()
+    user = get_current_user()
+    emp = user.employee_profile
+    if not emp:
+        return jsonify({'message': 'Employee profile not found'}), 404
+
     new_leave = Leave(
-        employee_id=current_user.id,
+        employee_id=emp.id,
         leave_type_id=data['leave_type_id'],
-        start_date=data['start_date'],
-        end_date=data['end_date'],
+        start_date=datetime.strptime(data['start_date'], '%Y-%m-%d').date(),
+        end_date=datetime.strptime(data['end_date'], '%Y-%m-%d').date(),
         reason=data['reason']
     )
     db.session.add(new_leave)
@@ -774,6 +1180,8 @@ def organize_project():
         "models/employee_address.py": models_employee_address_py_content,
         "models/employee_bank.py": models_employee_bank_py_content,
         "models/employee_documents.py": models_employee_documents_py_content,
+        "models/payroll.py": models_payroll_py_content,
+        "routes/payroll.py": routes_payroll_py_content,
         "leave/__init__.py": leave_init_py_content,
         "leave/models.py": leave_models_py_content,
         "leave/routes.py": leave_routes_py_content,

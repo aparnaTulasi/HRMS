@@ -1,15 +1,6 @@
 from datetime import datetime
-from flask import Blueprint, request, jsonify, g, send_file
 from models import db
-from utils.decorators import token_required
-#from utils.rbac import require_roles
 
-from utils.payslip_pdf import generate_payslip_pdf
-
-from models.payroll import (
-    PayGrade, PayRole, Payslip,
-    PayslipEarning, PayslipDeduction, PayslipEmployerContribution, PayslipReimbursement
-)
 class PayGrade(db.Model):
     __tablename__ = "pay_grades"
 
@@ -26,6 +17,7 @@ class PayGrade(db.Model):
     medical_pct = db.Column(db.Float, default=0)
 
     is_active = db.Column(db.Boolean, default=True)
+    status = db.Column(db.String(20), nullable=False, default="ACTIVE")  # ACTIVE/DELETED
 
     created_by = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -50,7 +42,7 @@ class PayRole(db.Model):
     pay_grade = db.relationship("PayGrade")
 
 
-class Payslip(db.Model):
+class PaySlip(db.Model):
     __tablename__ = "payslips"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -129,3 +121,23 @@ class PayslipReimbursement(db.Model):
     payslip_id = db.Column(db.Integer, db.ForeignKey("payslips.id"), nullable=False, index=True)
     component = db.Column(db.String(120), nullable=False)
     amount = db.Column(db.Float, default=0)
+
+
+class PayrollChangeRequest(db.Model):
+    __tablename__ = "payroll_change_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+
+    request_type = db.Column(db.String(50), nullable=False)  # e.g., 'SALARY_REVISION', 'BONUS'
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=True)
+    
+    payload = db.Column(db.JSON, nullable=True)  # Store details like { "old_ctc": ..., "new_ctc": ... }
+    reason = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(20), default="PENDING")  # PENDING, APPROVED, REJECTED
+
+    requested_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    approved_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

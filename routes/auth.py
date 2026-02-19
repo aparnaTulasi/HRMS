@@ -18,8 +18,14 @@ auth_bp = Blueprint('auth', __name__)
 
 @auth_bp.route('/super-admin/signup', methods=['POST'])
 def super_admin_signup():
-    data = request.get_json()
-    if not data or not data.get('email') or not data.get('password'):
+    print("🔹 Received /super-admin/signup request", flush=True)
+    data = request.get_json(silent=True)
+    print(f"🔹 Payload: {data}", flush=True)
+
+    if not data:
+        return jsonify({'message': 'Invalid JSON or Content-Type header'}), 400
+
+    if not data.get('email') or not data.get('password'):
         return jsonify({'message': 'Email and password are required'}), 400
 
     email = data['email'].lower().strip()
@@ -59,20 +65,26 @@ def super_admin_signup():
 @auth_bp.route('/super-admin/verify-otp', methods=['POST'])
 def verify_super_admin_otp():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
         if not data:
             return jsonify({'message': 'Request body is missing'}), 400
 
-        email = data.get('email')
         otp = str(data.get('otp', '')).strip()
 
-        if not email or not otp:
-            return jsonify({'message': 'Email and OTP are required'}), 400
+        if not otp:
+            return jsonify({'message': 'OTP is required'}), 400
 
-        email = email.lower().strip()
-        sa = SuperAdmin.query.filter_by(email=email).first()
+        # Try to find by email if provided, otherwise by OTP
+        if data.get('email'):
+            email = data.get('email').lower().strip()
+            sa = SuperAdmin.query.filter_by(email=email).first()
+        else:
+            sa = SuperAdmin.query.filter_by(signup_otp=otp).first()
 
-        if not sa or sa.signup_otp != otp:
+        if not sa:
+            return jsonify({'message': 'Invalid OTP or User not found'}), 400
+            
+        if sa.signup_otp != otp:
             return jsonify({'message': 'Invalid OTP'}), 400
         
         if sa.signup_otp_expiry and sa.signup_otp_expiry < datetime.utcnow():
@@ -88,44 +100,67 @@ def verify_super_admin_otp():
         print(f"Error in verify-otp: {e}")
         return jsonify({'message': 'Internal Server Error', 'error': str(e)}), 500
 
-@auth_bp.route('/verify-signup-otp', methods=['POST', 'OPTIONS'])
+@auth_bp.route('/verify-signup-otp', methods=['POST'])
 def verify_signup_otp():
-    if request.method == 'OPTIONS':
-        return jsonify({'message': 'OK'}), 200
-
     print("🔹 Received /verify-signup-otp request", flush=True)
     data = request.get_json(silent=True) or {}
-    if not data or not data.get('email') or not data.get('otp'):
-        return jsonify({'message': 'Email and OTP are required'}), 400
+    print(f"🔹 Payload received: {data}", flush=True)
 
-    email = data['email'].lower().strip()
+    if not data:
+        return jsonify({'message': 'Invalid or missing JSON body. Check Content-Type header.'}), 400
+
+    if not data.get('otp'):
+        return jsonify({'message': 'OTP is required'}), 400
+
     otp = str(data['otp']).strip()
 
-    user = User.query.filter_by(email=email).first()
+    # 1. Try to find user by OTP in User table (Regular Employees)
+    user = User.query.filter_by(otp=otp).first()
+    sa = None
+
+    # 2. If not found, try to find in SuperAdmin table
     if not user:
-        return jsonify({'message': 'User not found'}), 404
+        sa = SuperAdmin.query.filter_by(signup_otp=otp).first()
+        if sa:
+            user = User.query.get(sa.user_id)
+
+    if not user:
+        return jsonify({'message': 'Invalid OTP'}), 400
 
     if user.status == 'ACTIVE':
         return jsonify({'message': 'User is already active'}), 200
 
-    if user.otp != otp:
-        return jsonify({'message': 'Invalid OTP'}), 400
-        
-    if user.otp_expiry and user.otp_expiry < datetime.utcnow():
-        return jsonify({'message': 'OTP has expired'}), 400
+    # Validate OTP Expiry
+    if sa:
+        if sa.signup_otp_expiry and sa.signup_otp_expiry < datetime.utcnow():
+            return jsonify({'message': 'OTP has expired'}), 400
+    else:
+        if user.otp_expiry and user.otp_expiry < datetime.utcnow():
+            return jsonify({'message': 'OTP has expired'}), 400
 
-    user.status = 'PENDING'
+    if user.role == 'SUPER_ADMIN':
+        user.status = 'ACTIVE'
+        message = 'OTP verified. Super Admin account activated.'
+        # Sync SuperAdmin record if exists
+        if not sa:
+            sa = SuperAdmin.query.filter_by(user_id=user.id).first()
+            
+        if sa:
+            sa.is_verified = True
+            sa.signup_otp = None
+            sa.signup_otp_expiry = None
+    else:
+        user.status = 'PENDING'
+        message = 'OTP verified. Waiting for admin approval.'
+
     user.otp = None
     user.otp_expiry = None
     db.session.commit()
 
-    return jsonify({'message': 'OTP verified. Waiting for admin approval.', 'status': 'PENDING'}), 200
+    return jsonify({'message': message, 'status': user.status}), 200
 
-@auth_bp.route('/resend-signup-otp', methods=['POST', 'OPTIONS'])
+@auth_bp.route('/resend-signup-otp', methods=['POST'])
 def resend_signup_otp():
-    if request.method == 'OPTIONS':
-        return jsonify({'message': 'OK'}), 200
-
     data = request.get_json(silent=True) or {}
     if not data or not data.get('email'):
         return jsonify({'message': 'Email is required'}), 400
@@ -164,6 +199,26 @@ def resend_signup_otp():
         return jsonify({'message': 'OTP resent successfully'}), 200
     else:
         return jsonify({'message': 'Failed to send OTP email. Check server logs.'}), 500
+
+@auth_bp.route('/resend-reset-otp', methods=['POST'])
+def resend_reset_otp():
+    data = request.get_json(silent=True) or {}
+    if not data or not data.get('email'):
+        return jsonify({'message': 'Email is required'}), 400
+
+    email = data['email'].lower().strip()
+    user = User.query.filter_by(email=email).first()
+
+    if not user:
+        return jsonify({'message': 'User not found'}), 404
+
+    otp = user.generate_otp()
+    db.session.commit()
+
+    if send_password_reset_otp(email, otp):
+        return jsonify({'message': 'Reset OTP resent successfully'}), 200
+    else:
+        return jsonify({'message': 'Failed to send OTP email'}), 500
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
@@ -208,18 +263,16 @@ def login():
         'status': user.status,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None,
-        'subdomain': company.subdomain if company else None,
     }
     if employee:
         user_data.update({
             'employee_id': employee.id,
             'employee_code': employee.employee_id,
-            'employee_name': employee.full_name,
+            'employee_name': employee.full_name, # Now a column, not a property
         })
 
     # Determine Redirect URL
-    subdomain = company.subdomain if company else ""
-    base_url = build_company_base_url(subdomain)
+    base_url = build_company_base_url("")
     
     role_paths = {
         "SUPER_ADMIN": "/super-admin/dashboard",
@@ -255,7 +308,6 @@ def get_current_user():
         'status': user.status,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None,
-        'subdomain': company.subdomain if company else None,
     }
     if employee:
         user_data.update({

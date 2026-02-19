@@ -72,8 +72,7 @@ def create_user(args):
             user_id=new_user.id,
             company_id=company.id,
             employee_id=f"EMP-{new_user.id:04d}",
-            first_name=first_name,
-            last_name=last_name,
+            full_name=f"{first_name} {last_name}",
             company_email=email,
             personal_email=email,
             date_of_joining=datetime.utcnow().date()

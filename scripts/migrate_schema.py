@@ -62,6 +62,8 @@ def run_migration():
     cursor.execute("DROP TABLE IF EXISTS asset_allocations")
     cursor.execute("DROP TABLE IF EXISTS travel_expenses")
     cursor.execute("DROP TABLE IF EXISTS employee_bank_details")
+    cursor.execute("DROP TABLE IF EXISTS employee_address")
+    cursor.execute("DROP TABLE IF EXISTS employee_documents")
     
     print("🔄 Dropping Payroll tables if exist...")
     cursor.execute("DROP TABLE IF EXISTS employee_salary_structure")
@@ -73,6 +75,41 @@ def run_migration():
     cursor.execute("DROP TABLE IF EXISTS payroll_earnings")
     cursor.execute("DROP TABLE IF EXISTS payroll_run_employees")
     cursor.execute("DROP TABLE IF EXISTS payroll_run")
+
+    print("🔄 Rebuilding 'employees' table...")
+    cursor.execute("DROP TABLE IF EXISTS employees")
+    cursor.execute("""
+    CREATE TABLE employees (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE,
+        company_id INTEGER NOT NULL,
+        employee_id VARCHAR(50) UNIQUE,
+        full_name VARCHAR(100) NOT NULL,
+        gender VARCHAR(10),
+        date_of_birth DATE,
+        department VARCHAR(50),
+        designation VARCHAR(50),
+        date_of_joining DATE,
+        phone_number VARCHAR(20),
+        personal_email VARCHAR(120),
+        company_email VARCHAR(120),
+        aadhaar_number VARCHAR(20) UNIQUE,
+        pan_number VARCHAR(20) UNIQUE,
+        employment_type VARCHAR(50),
+        manager_id INTEGER,
+        education_details JSON,
+        last_work_details JSON,
+        statutory_details JSON,
+        ctc FLOAT DEFAULT 0.0,
+        pay_grade VARCHAR(50),
+        created_at DATETIME,
+        updated_at DATETIME,
+        FOREIGN KEY(user_id) REFERENCES users(id),
+        FOREIGN KEY(company_id) REFERENCES companies(id),
+        FOREIGN KEY(manager_id) REFERENCES employees(id)
+    );
+    """)
+    print("   ✅ Created 'employees' table")
 
     conn.commit()
     conn.close()
