@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 from flask import Blueprint, request, jsonify, g  # pyre-ignore[21]
 from werkzeug.security import generate_password_hash  # pyre-ignore[21]
 import secrets
@@ -15,32 +16,70 @@ try:
 except Exception:
     try:
         from user import User  # pyre-ignore[21]
+=======
+from flask import Blueprint, request, jsonify, g
+from werkzeug.security import generate_password_hash
+import secrets
+import string
+from sqlalchemy import text
+
+from models import db
+
+# Import Company model from the models package
+from models.company import Company
+
+# Try import User model (project structure can differ)
+try:
+    from models.user import User
+except Exception:
+    try:
+        from user import User
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     except Exception:
         User = None
 
 # Try import Branch model
 try:
+<<<<<<< HEAD
     from models.branch import Branch  # pyre-ignore[21]
+=======
+    from models.branch import Branch
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 except ImportError:
     Branch = None
 
 # Try import your existing email function (do NOT change its internal logic)
 send_login_credentials = None
 try:
+<<<<<<< HEAD
     from utils.email_utils import send_login_credentials  # pyre-ignore[21]
 except Exception:
     try:
         from email_utils import send_login_credentials  # pyre-ignore[21]
+=======
+    from utils.email_utils import send_login_credentials
+except Exception:
+    try:
+        from email_utils import send_login_credentials
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     except Exception:
         send_login_credentials = None
 
 # Import ID generator utils
 try:
+<<<<<<< HEAD
     from id_generator import normalize_prefix  # pyre-ignore[21]
 except ImportError:
     normalize_prefix = lambda x: x # Fallback if file missing
 
 from utils.jwt_auth import jwt_required  # pyre-ignore[21]
+=======
+    from id_generator import normalize_prefix
+except ImportError:
+    normalize_prefix = lambda x: x # Fallback if file missing
+
+from utils.jwt_auth import jwt_required
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 company_bp = Blueprint("company_bp", __name__)
 
@@ -82,7 +121,11 @@ def slugify(value: str) -> str:
     s = (value or "").strip().lower()
     s = "".join(ch if (ch.isalnum() or ch in ["-", " "]) else "" for ch in s)
     s = "-".join([p for p in s.split() if p])
+<<<<<<< HEAD
     return (s[:100] or "company")  # pyre-ignore
+=======
+    return (s[:100] or "company")
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 
 def unique_subdomain(base: str) -> str:
@@ -199,12 +242,17 @@ def create_user_and_email(company_id: int, email: str, role: str, name: str = ""
 # POST /api/superadmin/companies
 # ----------------------------
 @company_bp.route("/companies", methods=["POST"])
+<<<<<<< HEAD
 @company_bp.route("/create-company", methods=["GET", "POST"])
 def create_company():
     # Fallback: if GET is used, we return the list of companies (same as list_companies)
     # This prevents 405 error if frontend calls GET on /create-company
     if request.method == "GET":
         return list_companies()
+=======
+@company_bp.route("/create-company", methods=["POST"])
+def create_company():
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     # guard = require_super_admin()
     # if guard:
     #     return guard
@@ -304,6 +352,7 @@ def create_company():
             db.session.add(company)
             db.session.flush()
 
+<<<<<<< HEAD
         # --- AUTO-CREATE DEFAULT BRANCH IF NONE PROVIDED ---
         if is_new_company and not branches_payload:
             branches_payload = [{
@@ -312,6 +361,8 @@ def create_company():
                 "status": "Active"
             }]
 
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
         created_branches = []
         if branches_payload:
             if not Branch:
@@ -453,6 +504,7 @@ def list_branches():
     if not Branch:
         return jsonify({"success": False, "message": "Branch model not found"}), 500
 
+<<<<<<< HEAD
     # 1. Auto-Sync: Ensure every company has at least one explicit branch record
     # This fulfills the requirement that "every company should be stored as a branch too".
     all_companies = Company.query.all()
@@ -471,6 +523,9 @@ def list_branches():
         db.session.commit()
 
     # 2. Query: Use a join to get the full list of branches with company names
+=======
+    # Join Branch with Company to get company name
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     results = db.session.query(Branch, Company).join(Company, Branch.company_id == Company.id).order_by(Branch.id.desc()).all()
 
     data = []
@@ -640,6 +695,7 @@ def list_companies():
     for c in companies:
         data.append({
             "id": c.id,
+<<<<<<< HEAD
             "company_name": c.company_name,
             "name": c.company_name,  # Keeping legacy 'name' for backward compatibility
             "company_code": c.company_code,
@@ -649,6 +705,10 @@ def list_companies():
             "state": c.state,
             "city_branch": c.city_branch,
             "timezone": c.timezone,
+=======
+            "name": c.company_name,
+            "company_code": c.company_code,
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
             "email": c.email,
             "address": c.address,
             "status": getattr(c, 'status', 'Active')
@@ -719,6 +779,7 @@ def update_company(company_id):
         "address", "phone", "email"
     ]
     for field in allowed:
+<<<<<<< HEAD
         if field in data:  # pyre-ignore
             setattr(c, field, data[field])  # pyre-ignore
 
@@ -729,6 +790,18 @@ def update_company(company_id):
     # subdomain update is optional (only if you want)
     if "subdomain" in data:  # pyre-ignore
         sub = (data.get("subdomain") or "").strip().lower()  # pyre-ignore
+=======
+        if field in data:
+            setattr(c, field, data[field])
+
+    # If frontend sends company_Id, map it
+    if "company_Id" in data:
+        c.company_code = (data.get("company_Id") or "").strip().upper()
+
+    # subdomain update is optional (only if you want)
+    if "subdomain" in data:
+        sub = (data.get("subdomain") or "").strip().lower()
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
         if sub and Company.query.filter(Company.subdomain == sub, Company.id != c.id).first():
             return jsonify({"success": False, "message": "subdomain already exists"}), 400
         c.subdomain = sub
@@ -780,7 +853,11 @@ def add_users_to_company(company_id):
 
     # Ensure HR is adding to their own company
     user = getattr(g, "user", None)
+<<<<<<< HEAD
     if user.company_id != company_id:  # pyre-ignore
+=======
+    if user.company_id != company_id:
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
         return jsonify({"success": False, "message": "Forbidden: You can only manage your own company employees"}), 403
 
     data = request.get_json(silent=True) or {}

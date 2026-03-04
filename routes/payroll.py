@@ -1,4 +1,5 @@
 import io
+<<<<<<< HEAD
 import re
 import logging
 from typing import cast, Any, Dict, List
@@ -12,6 +13,13 @@ from models.payroll import (
     SalaryComponent, SalaryStructure, StructureComponent, StatutorySettings
 )
 from models.employee import Employee
+=======
+from datetime import datetime
+from flask import Blueprint, request, jsonify, send_file, g
+from models import db
+from utils.decorators import token_required
+from models.payroll import PayGrade, PayRole, PaySlip, PayrollChangeRequest
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 payroll_bp = Blueprint("payroll_bp", __name__)
 
@@ -39,6 +47,7 @@ def _company_id():
     return int(cid)
 
 
+<<<<<<< HEAD
 def _sum_values(d: Any) -> float:
     if not d or not isinstance(d, dict):
         return 0.0
@@ -50,10 +59,21 @@ def _sum_values(d: Any) -> float:
             val = float(v)
             total += val # pyre-ignore
         except (ValueError, TypeError):
+=======
+def _sum_values(d):
+    if not d:
+        return 0.0
+    total = 0.0
+    for _, v in d.items():
+        try:
+            total += float(v)
+        except Exception:
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
             pass
     return round(total, 2)
 
 
+<<<<<<< HEAD
 def _populate_payslip_from_structure(ps: PaySlip):
     """
     Populates earnings/deductions of a payslip from the employee's assigned SalaryStructure.
@@ -106,6 +126,17 @@ def _recalc_payslip(ps: PaySlip):
     # monthly_ctc and annual_ctc logic might differ based on employer contributions
     # For now, keeping it simple:
     ps.monthly_ctc = round(ps.gross_salary + _sum_values(ps.employer_contrib_dict), 2)
+=======
+def _recalc_payslip(ps: PaySlip):
+    ps.total_earnings = _sum_values(ps.earnings)
+    ps.total_deductions = _sum_values(ps.deductions)
+    ps.total_reimbursements = _sum_values(ps.reimbursements)
+
+    ps.gross_salary = ps.total_earnings
+    ps.net_salary = round(ps.total_earnings - ps.total_deductions + ps.total_reimbursements, 2)
+
+    ps.monthly_ctc = round(ps.gross_salary, 2)
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     ps.annual_ctc = round(ps.monthly_ctc * 12, 2)
 
 
@@ -165,10 +196,17 @@ def superadmin_paygrades_pdf():
 
         c.drawString(50, y, r.grade_name)
         c.drawString(150, y, f"{r.min_salary:.2f} - {r.max_salary:.2f}")
+<<<<<<< HEAD
         c.drawString(300, y, f"{r.basic_pct:.2f}")
         c.drawString(360, y, f"{r.hra_pct:.2f}")
         c.drawString(420, y, f"{r.ta_pct:.2f}")
         c.drawString(470, y, f"{r.medical_pct:.2f}")
+=======
+        c.drawString(300, y, f"{r.basic_percent:.2f}")
+        c.drawString(360, y, f"{r.hra_percent:.2f}")
+        c.drawString(420, y, f"{r.ta_percent:.2f}")
+        c.drawString(470, y, f"{r.medical_percent:.2f}")
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
         y -= 14
 
     c.save()
@@ -202,10 +240,17 @@ def account_create_paygrade():
         grade_name=grade_name,
         min_salary=float(data.get("min_salary", 0) or 0),
         max_salary=float(data.get("max_salary", 0) or 0),
+<<<<<<< HEAD
         basic_pct=float(data.get("basic_percent", 50) or 50),
         hra_pct=float(data.get("hra_percent", 20) or 20),
         ta_pct=float(data.get("ta_percent", 10) or 10),
         medical_pct=float(data.get("medical_percent", 3) or 3),
+=======
+        basic_percent=float(data.get("basic_percent", 50) or 50),
+        hra_percent=float(data.get("hra_percent", 20) or 20),
+        ta_percent=float(data.get("ta_percent", 10) or 10),
+        medical_percent=float(data.get("medical_percent", 3) or 3),
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     )
     db.session.add(row)
     try:
@@ -229,6 +274,7 @@ def account_update_paygrade(paygrade_id):
     if "grade_name" in data:
         row.grade_name = (data["grade_name"] or "").strip()
 
+<<<<<<< HEAD
     field_map = {
         "min_salary": "min_salary",
         "max_salary": "max_salary",
@@ -240,6 +286,11 @@ def account_update_paygrade(paygrade_id):
     for f_in, f_out in field_map.items():
         if f_in in data:
             setattr(row, f_out, float(data[f_in] or 0))
+=======
+    for f in ["min_salary", "max_salary", "basic_percent", "hra_percent", "ta_percent", "medical_percent"]:
+        if f in data:
+            setattr(row, f, float(data[f] or 0))
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
     db.session.commit()
     return jsonify({"success": True, "data": row.to_dict()}), 200
@@ -369,7 +420,11 @@ def admin_list_payslips():
 @require_roles("ADMIN")
 def admin_create_payslip():
     cid = _company_id()
+<<<<<<< HEAD
     data: dict = request.get_json(silent=True) or {}
+=======
+    data = request.get_json(silent=True) or {}
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
     for k in ["employee_id", "pay_month", "pay_year"]:
         if not data.get(k):
@@ -390,15 +445,26 @@ def admin_create_payslip():
         paid_days=int(data.get("paid_days", 30) or 30),
         lwp_days=int(data.get("lwp_days", 0) or 0),
         pay_date=pay_date,
+<<<<<<< HEAD
         bank_account_no=data.get("bank_account_number"),
         uan_no=data.get("uan_number"),
         esi_account_no=data.get("esi_account_number"),
+=======
+        earnings=data.get("earnings") or {},
+        deductions=data.get("deductions") or {},
+        employer_contribution=data.get("employer_contribution") or {},
+        reimbursements=data.get("reimbursements") or {},
+        bank_account_number=data.get("bank_account_number"),
+        uan_number=data.get("uan_number"),
+        esi_account_number=data.get("esi_account_number"),
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
         tax_regime=data.get("tax_regime", "Old Regime"),
         section_80c=float(data.get("section_80c", 0) or 0),
         monthly_rent=float(data.get("monthly_rent", 0) or 0),
         city_type=data.get("city_type", "Non-Metro"),
         other_deductions=float(data.get("other_deductions", 0) or 0),
         calculated_tds=float(data.get("calculated_tds", 0) or 0),
+<<<<<<< HEAD
         pf_employee_pct=float(data.get("pf_employee_percent", 12) or 12),
         pf_employer_pct=float(data.get("pf_employer_percent", 12) or 12),
         esi_employee_pct=float(data.get("esi_employee_percent", 0.75) or 0.75),
@@ -416,6 +482,15 @@ def admin_create_payslip():
     for comp, amt in (data.get("reimbursements") or {}).items():
         ps.reimbursements.append(PayslipReimbursement(component=comp, amount=float(amt)))
 
+=======
+        pf_employee_percent=float(data.get("pf_employee_percent", 12) or 12),
+        pf_employer_percent=float(data.get("pf_employer_percent", 12) or 12),
+        esi_employee_percent=float(data.get("esi_employee_percent", 0.75) or 0.75),
+        esi_employer_percent=float(data.get("esi_employer_percent", 3.25) or 3.25),
+        created_by=getattr(g.user, "id", None),
+    )
+
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     _recalc_payslip(ps)
 
     db.session.add(ps)
@@ -428,6 +503,7 @@ def admin_create_payslip():
     return jsonify({"success": True, "data": ps.to_dict()}), 201
 
 
+<<<<<<< HEAD
 @payroll_bp.post("/admin/payslips/generate")
 @require_roles("ADMIN")
 def admin_generate_payslip():
@@ -485,6 +561,8 @@ def admin_generate_payslip():
     return jsonify({"success": True, "data": ps.to_dict()}), 201
 
 
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 @payroll_bp.get("/admin/payslips/<int:payslip_id>")
 @require_roles("ADMIN")
 def admin_get_payslip(payslip_id):
@@ -503,6 +581,7 @@ def admin_update_payslip(payslip_id):
     if not ps:
         return jsonify({"success": False, "message": "Payslip not found"}), 404
 
+<<<<<<< HEAD
     data = (request.get_json(silent=True) or {})
 
     # simple fields
@@ -549,14 +628,43 @@ def admin_update_payslip(payslip_id):
     for f_in, f_out in field_map.items():
         if data.get(f_in) is not None:
             setattr(ps, f_out, data.get(f_in))
+=======
+    data = request.get_json(silent=True) or {}
+
+    # simple fields
+    for f in ["department_id", "pay_role_id", "total_days", "paid_days", "lwp_days"]:
+        if f in data:
+            setattr(ps, f, int(data[f] or 0) if f in ["total_days", "paid_days", "lwp_days"] else data[f])
+
+    if "pay_date" in data:
+        pd = _parse_date(data["pay_date"])
+        if data["pay_date"] and not pd:
+            return jsonify({"success": False, "message": "pay_date must be YYYY-MM-DD"}), 400
+        ps.pay_date = pd
+
+    # json blocks
+    for f in ["earnings", "deductions", "employer_contribution", "reimbursements"]:
+        if f in data and isinstance(data[f], dict):
+            setattr(ps, f, data[f])
+
+    # optional blocks
+    for f in ["bank_account_number", "uan_number", "esi_account_number", "tax_regime", "city_type"]:
+        if f in data:
+            setattr(ps, f, data[f])
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
     for f in [
         "section_80c", "monthly_rent", "other_deductions", "calculated_tds",
         "pf_employee_percent", "pf_employer_percent", "esi_employee_percent", "esi_employer_percent"
     ]:
+<<<<<<< HEAD
         if data.get(f) is not None:
             f_out = f.replace("percent", "pct") if "percent" in f else f
             setattr(ps, f_out, float(data.get(f) or 0))
+=======
+        if f in data:
+            setattr(ps, f, float(data[f] or 0))
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
     _recalc_payslip(ps)
     db.session.commit()
@@ -718,6 +826,7 @@ def _generate_payslip_pdf(ps: PaySlip, download_name: str):
     y -= 24
 
     def section(title, data_dict):
+<<<<<<< HEAD
         local_y = [y]  # Use list for mutable scoping
         c.setFont("Helvetica-Bold", 12)
         c.drawString(50, local_y[0], title)
@@ -747,6 +856,36 @@ def _generate_payslip_pdf(ps: PaySlip, download_name: str):
     y = section("Deductions", ps.deductions_dict if hasattr(ps, 'deductions_dict') else {})
     y = section("Employer Contribution", ps.employer_contrib_dict if hasattr(ps, 'employer_contrib_dict') else {})
     y = section("Reimbursements", ps.reimbursements_dict if hasattr(ps, 'reimbursements_dict') else {})
+=======
+        nonlocal y
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(50, y, title)
+        y -= 14
+        c.setFont("Helvetica", 10)
+
+        if not data_dict:
+            c.drawString(60, y, "-")
+            y -= 14
+            return
+
+        for k, v in data_dict.items():
+            if y < 80:
+                c.showPage()
+                y = height - 50
+                c.setFont("Helvetica", 10)
+            c.drawString(60, y, str(k))
+            try:
+                c.drawRightString(520, y, f"{float(v or 0):.2f}")
+            except Exception:
+                c.drawRightString(520, y, "0.00")
+            y -= 12
+        y -= 10
+
+    section("Earnings", ps.earnings or {})
+    section("Deductions", ps.deductions or {})
+    section("Employer Contribution", ps.employer_contribution or {})
+    section("Reimbursements", ps.reimbursements or {})
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
     if y < 130:
         c.showPage()
@@ -912,6 +1051,7 @@ def _apply_request(req_row: PayrollChangeRequest):
         elif req_row.action == "DELETE":
             row = PaySlip.query.filter_by(id=req_row.entity_id, company_id=cid, status="ACTIVE").first()
             if row:
+<<<<<<< HEAD
                 row.status = "DELETED"
 
 
@@ -1115,3 +1255,6 @@ def list_components_dropdown():
     rows = SalaryComponent.query.filter_by(company_id=cid, status="ACTIVE").all()
     data = [{"id": r.id, "name": r.name, "type": r.type} for r in rows]
     return jsonify({"success": True, "data": data}), 200
+=======
+                row.status = "DELETED"
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1

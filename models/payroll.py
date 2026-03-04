@@ -1,4 +1,5 @@
 from datetime import datetime
+<<<<<<< HEAD
 from typing import Dict, Any, cast, Optional
 from models import db # pyre-ignore[21]
 
@@ -109,6 +110,9 @@ class StatutorySettings(db.Model):
 # =========================================================
 # OLD MODELS (RETAINED FOR COMPATIBILITY / MIGRATION)
 # =========================================================
+=======
+from models import db
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 class PayGrade(db.Model):
     __tablename__ = "pay_grades"
@@ -132,6 +136,7 @@ class PayGrade(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+<<<<<<< HEAD
     def to_dict(self):
         return {
             "id": self.id,
@@ -148,6 +153,8 @@ class PayGrade(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 class PayRole(db.Model):
     __tablename__ = "pay_roles"
@@ -159,7 +166,10 @@ class PayRole(db.Model):
     pay_grade_id = db.Column(db.Integer, db.ForeignKey("pay_grades.id"), nullable=True)
 
     is_active = db.Column(db.Boolean, default=True)
+<<<<<<< HEAD
     status = db.Column(db.String(20), default="ACTIVE")
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
     created_by = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -167,6 +177,7 @@ class PayRole(db.Model):
 
     pay_grade = db.relationship("PayGrade")
 
+<<<<<<< HEAD
     def to_dict(self):
         return {
             "id": self.id,
@@ -221,6 +232,8 @@ class SalaryStructureAssignment(db.Model):
             "salary_structure_name": self.salary_structure.name if self.salary_structure else (self.pay_grade.grade_name if self.pay_grade else None)
         }
 
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 class PaySlip(db.Model):
     __tablename__ = "payslips"
@@ -256,11 +269,14 @@ class PaySlip(db.Model):
     uan_no = db.Column(db.String(50), nullable=True)
     esi_account_no = db.Column(db.String(50), nullable=True)
 
+<<<<<<< HEAD
     pf_employee_pct = db.Column(db.Float, default=12)
     pf_employer_pct = db.Column(db.Float, default=12)
     esi_employee_pct = db.Column(db.Float, default=0.75)
     esi_employer_pct = db.Column(db.Float, default=3.25)
 
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
     status = db.Column(db.String(20), default="DRAFT")  # DRAFT/FINAL
     pdf_path = db.Column(db.String(255), nullable=True)
 
@@ -275,6 +291,7 @@ class PaySlip(db.Model):
     employer_contribs = db.relationship("PayslipEmployerContribution", backref="payslip", cascade="all, delete-orphan")
     reimbursements = db.relationship("PayslipReimbursement", backref="payslip", cascade="all, delete-orphan")
 
+<<<<<<< HEAD
     @property
     def earnings_dict(self):
         return {e.component: e.amount for e in self.earnings}
@@ -324,6 +341,8 @@ class PaySlip(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
+=======
+>>>>>>> 04003eaf0043fea586f7748da275677b8b3436c1
 
 class PayslipEarning(db.Model):
     __tablename__ = "payslip_earnings"
