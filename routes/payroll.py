@@ -12,6 +12,9 @@ from models.payroll import (
     SalaryComponent, SalaryStructure, StructureComponent, StatutorySettings
 )
 from models.employee import Employee
+from models.company import Company
+from models.attendance import Attendance
+import calendar
 
 payroll_bp = Blueprint("payroll_bp", __name__)
 
@@ -37,6 +40,33 @@ def _company_id():
     if not cid:
         return None
     return int(cid)
+
+
+def _get_attendance_summary(employee_id, month, year):
+    """
+    Returns (total_days, lwp_days, paid_days)
+    """
+    _, last_day = calendar.monthrange(year, month)
+    total_days = last_day
+    
+    # Count Absents and Half Days
+    absent_count = Attendance.query.filter(
+        Attendance.employee_id == employee_id,
+        Attendance.month == month,
+        Attendance.year == year,
+        Attendance.status.in_(["Absent", "LWP"])
+    ).count()
+    
+    half_day_count = Attendance.query.filter(
+        Attendance.employee_id == employee_id,
+        Attendance.month == month,
+        Attendance.year == year,
+        Attendance.status.in_(["Half Day", "Half-Day"])
+    ).count()
+    
+    lwp_days = float(absent_count) + (float(half_day_count) * 0.5)
+    paid_days = float(total_days) - lwp_days
+    return total_days, lwp_days, paid_days
 
 
 def _sum_values(d: Any) -> float:
@@ -67,6 +97,19 @@ def _populate_payslip_from_structure(ps: PaySlip):
         return
 
     struct = assignment.salary_structure
+    
+    total_days = ps.total_days or 30
+    paid_days = ps.paid_days if ps.paid_days is not None else total_days
+    prorate_factor = paid_days / total_days if total_days > 0 else 1.0
+
+    # First pass: find Basic Salary amount
+    basic_amount = ps.monthly_ctc # Fallback
+    for sc in struct.components:
+        if sc.component and sc.component.name.upper() == "BASIC":
+            val = sc.override_value if sc.override_value is not None else sc.component.amount_value
+            basic_amount = val * prorate_factor
+            break
+
     for sc in struct.components:
         comp = sc.component
         if not comp or comp.status != "ACTIVE":
@@ -79,32 +122,62 @@ def _populate_payslip_from_structure(ps: PaySlip):
         if comp.calculation_type == "FLAT":
             amount = val
         elif comp.calculation_type == "PERCENT_OF_BASIC":
-            # This requires a "Basic Salary" component to exist and be processed first.
-            # For simplicity in this logic, we assume percent of monthly_ctc for now
-            # unless we find the basic component.
-            amount = (val / 100.0) * ps.monthly_ctc 
+            amount = (val / 100.0) * (basic_amount / prorate_factor if prorate_factor > 0 else basic_amount)
         elif comp.calculation_type == "PERCENT_OF_CTC":
             amount = (val / 100.0) * ps.monthly_ctc
         
+        # Apply Prorating for earnings/deductions if applicable
+        if comp.type in ["EARNING"] and comp.is_prorated:
+            amount = amount * prorate_factor
+
         # Map component type to payslip relationship
         if comp.type == "EARNING":
-            ps.earnings.append(PayslipEarning(component=comp.name, amount=amount))
+            ps.earnings.append(PayslipEarning(component=comp.name, amount=round(amount, 2)))
         elif comp.type == "DEDUCTION" or comp.type == "STATUTORY_DEDUCTION":
-            ps.deductions.append(PayslipDeduction(component=comp.name, amount=amount))
+            ps.deductions.append(PayslipDeduction(component=comp.name, amount=round(amount, 2)))
         elif comp.type == "EMPLOYER_CONTRIBUTION":
-            ps.employer_contribs.append(PayslipEmployerContribution(component=comp.name, amount=amount))
+            ps.employer_contribs.append(PayslipEmployerContribution(component=comp.name, amount=round(amount, 2)))
         elif comp.type == "REIMBURSEMENT":
-            ps.reimbursements.append(PayslipReimbursement(component=comp.name, amount=amount))
+            ps.reimbursements.append(PayslipReimbursement(component=comp.name, amount=round(amount, 2)))
 
 
 def _recalc_payslip(ps: PaySlip):
+    # Sum up current manually entered/populated values
+    earnings_total = _sum_values(ps.earnings_dict)
+    
+    # 1. Handle Statutory Calculations automatically if flags are set
+    # Find Basic Earning for base calculations
+    basic_amt = 0.0
+    for e in ps.earnings:
+        if e.component.upper() == "BASIC":
+            basic_amt = e.amount
+            break
+    
+    if basic_amt > 0:
+        # Update PF Employee if in deductions
+        for d in ps.deductions:
+            if d.component.upper() in ["PF", "PF EMPLOYEE", "PROVIDENT FUND"]:
+                d.amount = round((ps.pf_employee_pct / 100.0) * basic_amt, 2)
+        
+        # Update ESI Employee if in deductions
+        for d in ps.deductions:
+            if d.component.upper() in ["ESI", "ESI EMPLOYEE"]:
+                if basic_amt <= 21000: # Standard ESI limit, but we calculate if present
+                    d.amount = round((ps.esi_employee_pct / 100.0) * basic_amt, 2)
+        
+        # Update Employer Contributions
+        for c in ps.employer_contribs:
+            if c.component.upper() in ["PF", "PF EMPLOYER"]:
+                c.amount = round((ps.pf_employer_pct / 100.0) * basic_amt, 2)
+            if c.component.upper() in ["ESI", "ESI EMPLOYER"]:
+                c.amount = round((ps.esi_employer_pct / 100.0) * basic_amt, 2)
+
     ps.gross_salary = _sum_values(ps.earnings_dict)
     ps.total_deductions = _sum_values(ps.deductions_dict)
     ps.total_reimbursements = _sum_values(ps.reimbursements_dict)
 
     ps.net_salary = round(ps.gross_salary - ps.total_deductions + ps.total_reimbursements, 2)
-    # monthly_ctc and annual_ctc logic might differ based on employer contributions
-    # For now, keeping it simple:
+    # monthly_ctc includes employer contributions
     ps.monthly_ctc = round(ps.gross_salary + _sum_values(ps.employer_contrib_dict), 2)
     ps.annual_ctc = round(ps.monthly_ctc * 12, 2)
 
@@ -403,12 +476,14 @@ def admin_create_payslip():
         city_type=data.get("city_type", "Non-Metro"),
         other_deductions=float(data.get("other_deductions", 0) or 0),
         calculated_tds=float(data.get("calculated_tds", 0) or 0),
-        pf_employee_pct=float(data.get("pf_employee_percent", 12) or 12),
-        pf_employer_pct=float(data.get("pf_employer_percent", 12) or 12),
-        esi_employee_pct=float(data.get("esi_employee_percent", 0.75) or 0.75),
-        esi_employer_pct=float(data.get("esi_employer_percent", 3.25) or 3.25),
-        created_by=getattr(g.user, "id", None),
     )
+
+    # Fetch Statutory Defaults
+    st = StatutorySettings.query.filter_by(company_id=cid).first()
+    ps.pf_employee_pct = float(data.get("pf_employee_percent") or (st.pf_employee_pct if st else 12))
+    ps.pf_employer_pct = float(data.get("pf_employer_percent") or (st.pf_employer_pct if st else 12))
+    ps.esi_employee_pct = float(data.get("esi_employee_percent") or (st.esi_employee_pct if st else 0.75))
+    ps.esi_employer_pct = float(data.get("esi_employer_percent") or (st.esi_employer_pct if st else 3.25))
 
     # Relationships
     for comp, amt in (data.get("earnings") or {}).items():
@@ -471,7 +546,20 @@ def admin_generate_payslip():
         status="DRAFT",
         created_by=getattr(g.user, "id", None)
     )
+
+    # Fetch Statutory Defaults for Generate
+    st = StatutorySettings.query.filter_by(company_id=cid).first()
+    ps.pf_employee_pct = st.pf_employee_pct if st else 12
+    ps.pf_employer_pct = st.pf_employer_pct if st else 12
+    ps.esi_employee_pct = st.esi_employee_pct if st else 0.75
+    ps.esi_employer_pct = st.esi_employer_pct if st else 3.25
     
+    # Automatic attendance summary
+    total, lwp, paid = _get_attendance_summary(emp_id, m_int, y_int)
+    ps.total_days = total
+    ps.lwp_days = lwp
+    ps.paid_days = paid
+
     # Base ctc logic: use employee ctc field
     ps.annual_ctc = float(employee.ctc or 0)
     ps.monthly_ctc = round(ps.annual_ctc / 12.0, 2)
@@ -936,6 +1024,12 @@ def create_salary_assignment():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
 
+    if g.user.role == "SUPER_ADMIN" and not cid:
+        cid = data.get("company_id")
+
+    if not cid:
+        return jsonify({"success": False, "message": "company_id is required"}), 400
+
     emp_id = data.get("employee_id")
     grade_id = data.get("pay_grade_id") # Legacy
     struct_id = data.get("salary_structure_id") # New modular
@@ -984,6 +1078,12 @@ def list_salary_components():
 def create_salary_component():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
+
+    if g.user.role == "SUPER_ADMIN" and not cid:
+        cid = data.get("company_id")
+
+    if not cid:
+        return jsonify({"success": False, "message": "company_id is required"}), 400
     
     comp = SalaryComponent(
         company_id=cid,
@@ -1026,6 +1126,12 @@ def list_salary_structures():
 def create_salary_structure():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
+
+    if g.user.role == "SUPER_ADMIN" and not cid:
+        cid = data.get("company_id")
+
+    if not cid:
+        return jsonify({"success": False, "message": "company_id is required"}), 400
     
     struct = SalaryStructure(
         company_id=cid,

@@ -9,6 +9,8 @@ from models.company import Company
 from utils.decorators import token_required, role_required
 from datetime import datetime
 import re
+from utils.email_utils import send_login_credentials, send_account_created_alert
+from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -37,10 +39,11 @@ def generate_employee_id(company_code: str) -> str:
 
 @admin_bp.route('/create-manager', methods=['POST'])
 @admin_bp.route('/create-employee', methods=['POST'])
+@admin_bp.route('/create-hr', methods=['POST'])
 @token_required
 @role_required(['SUPER_ADMIN', 'ADMIN'])
 def create_employee():
-    data = request.get_json()
+    data = request.get_json(force=True) or {}
     if not data:
         return jsonify({'message': 'No input data provided'}), 400
 
@@ -76,7 +79,9 @@ def create_employee():
             return jsonify({'message': 'Admin company context not found'}), 404
 
     # 3. Check Email Uniqueness
-    email = data.get('email')
+    email = data.get('email') or data.get('company_email')
+    personal_email = data.get('personal_email')
+    
     if not email:
         return jsonify({'message': 'Email is required'}), 400
         
@@ -124,7 +129,7 @@ def create_employee():
 
     new_employee = Employee(
         user_id=new_user.id,
-        company_id=g.user.company_id,
+        company_id=company.id,
         employee_id=data.get('employee_id') or new_emp_id,
         full_name=data['full_name'],
         department=data.get('department'),
@@ -132,26 +137,44 @@ def create_employee():
         date_of_joining=datetime.strptime(data['date_of_joining'], '%Y-%m-%d').date() if data.get('date_of_joining') else None,
         gender=data.get('gender'),
         personal_email=data.get('personal_email'),
+        pay_grade=data.get('pay_grade'),
+        ctc=float(data.get('ctc', 0.0)),
 
         # ✅ IMPORTANT
-        phone_number=data.get('phone_number'),
-        company_email=data.get('email')
+        phone_number=data.get('phone_number') or data.get('mobile_number'),
+        company_email=email
     )
     
     try:
         db.session.add(new_employee)
         db.session.commit()
-    except IntegrityError:
+
+        # Send emails
+        web_address = build_web_address(company.subdomain)
+        login_url = build_common_login_url(company.subdomain)
+        created_by = "Super Admin" if g.user.role == 'SUPER_ADMIN' else "Admin"
+
+        # Mail 1: Account Created
+        send_account_created_alert(personal_email or email, company.company_name, created_by)
+
+        # Mail 2: Login Credentials
+        send_login_credentials(
+            personal_email=personal_email or email,
+            company_email=email,
+            password=password,
+            company_name=company.company_name,
+            web_address=web_address,
+            login_url=login_url,
+            created_by=created_by
+        )
+    except Exception as e:
         db.session.rollback()
-        db.session.add(new_user) # Re-add user as rollback removed it from session
-        new_employee.employee_id = generate_employee_id(prefix)
-        db.session.add(new_employee)
-        db.session.commit()
+        return jsonify({"message": "Error creating record", "error": str(e)}), 500
 
     return jsonify({
         'message': f'{designation or role} created successfully',
         'employee_id': new_employee.employee_id,
-        'company_email': getattr(new_employee, 'company_email', email),
-        'email_sent': True,
-        'personal_email': getattr(new_employee, 'personal_email', None)
+        'company_email': email,
+        'personal_email': personal_email,
+        'email_sent': True
     }), 201

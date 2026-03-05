@@ -27,5 +27,5 @@ def clean_domain(domain):
 def build_web_address(subdomain):
     return build_company_base_url(subdomain)
 
-def build_common_login_url():
-    return build_company_base_url(None)
+def build_common_login_url(subdomain=None):
+    return build_company_base_url(subdomain)

@@ -306,15 +306,24 @@ def create_company():
                 address=data.get("address"),
                 phone=data.get("phone"),
                 email=data.get("email"),
+                latitude=data.get("latitude"),
+                longitude=data.get("longitude")
             )
             db.session.add(company)
             db.session.flush()
 
         # --- AUTO-CREATE DEFAULT BRANCH IF NONE PROVIDED ---
         if is_new_company and not branches_payload:
+            # Use company coordinates if available, otherwise default to HYD
+            primary_lat = data.get("latitude") or 17.3850
+            primary_lng = data.get("longitude") or 78.4867
+            
             branches_payload = [{
                 "branch_name": f"{city_branch} Office" if city_branch else "Primary Branch",
                 "address": company.address or city_branch,
+                "state": company.state,
+                "latitude": primary_lat,
+                "longitude": primary_lng,
                 "status": "Active"
             }]
 
@@ -382,6 +391,7 @@ def create_company():
                     "id": company.id,
                     "company_name": company.company_name,
                     "company_code": company.company_code,
+                    "company_Id": company.company_code, # For frontend compatibility
                     "subdomain": company.subdomain,
                     "industry": company.industry,
                     "company_size": company.company_size,
@@ -470,6 +480,8 @@ def list_branches():
                 company_id=c.id,
                 branch_name=f"{c.city_branch} Office" if c.city_branch else "Primary Branch",
                 address=c.address or c.city_branch,
+                latitude=17.3850, # Default to HYD
+                longitude=78.4867,
                 status="Active"
             )
             db.session.add(default_branch)
@@ -483,13 +495,21 @@ def list_branches():
 
     data = []
     for b, c in results:
+        lat = b.latitude if b.latitude is not None else 17.3850
+        lng = b.longitude if b.longitude is not None else 78.4867
+        
         data.append({
             "id": b.id,
             "branch_name": b.branch_name,
+            "name": b.branch_name,          # Alias for Map UI
             "company_name": c.company_name,
+            "company": c.company_name,       # Alias for Map UI
             "address": b.address,
-            "latitude": b.latitude,
-            "longitude": b.longitude,
+            "state": c.state,                # Get from Company
+            "latitude": lat,
+            "lat": lat,              # Alias for Map UI
+            "longitude": lng,
+            "lng": lng,             # Alias for Map UI
             "status": b.status
         })
     
@@ -616,12 +636,20 @@ def get_branch_map():
     results = query.all()
     pins = []
     for b, c in results:
+        lat = b.latitude if b.latitude is not None else 17.3850
+        lng = b.longitude if b.longitude is not None else 78.4867
+        
         pins.append({
             "branch_id": b.id,
+            "id": b.id,                     # Alias
             "branch_name": b.branch_name,
+            "name": b.branch_name,          # Alias
             "company_name": c.company_name,
-            "latitude": b.latitude,
-            "longitude": b.longitude,
+            "company": c.company_name,       # Alias
+            "latitude": lat,
+            "lat": lat,              # Alias
+            "longitude": lng,
+            "lng": lng,             # Alias
             "status": b.status
         })
 
@@ -651,6 +679,7 @@ def list_companies():
             "company_name": c.company_name,
             "name": c.company_name,  # Keeping legacy 'name' for backward compatibility
             "company_code": c.company_code,
+            "company_Id": c.company_code, # For frontend compatibility
             "industry": c.industry,
             "company_size": c.company_size,
             "country": c.country,
@@ -690,6 +719,7 @@ def get_company(company_id):
             "id": c.id,
             "company_name": c.company_name,
             "company_code": c.company_code,
+            "company_Id": c.company_code, # For frontend compatibility
             "subdomain": c.subdomain,
             "industry": c.industry,
             "company_size": c.company_size,

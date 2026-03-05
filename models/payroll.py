@@ -19,6 +19,7 @@ class SalaryComponent(db.Model):
     amount_value = db.Column(db.Float, default=0.0)
     
     is_taxable = db.Column(db.Boolean, default=True)
+    is_prorated = db.Column(db.Boolean, default=True) # Whether to cut salary based on attendance
     is_statutory = db.Column(db.Boolean, default=False)
     is_part_of_ctc = db.Column(db.Boolean, default=True)
     # MONTHLY, YEARLY
@@ -35,6 +36,7 @@ class SalaryComponent(db.Model):
             "calculation_type": self.calculation_type,
             "amount_value": self.amount_value,
             "is_taxable": self.is_taxable,
+            "is_prorated": self.is_prorated,
             "is_statutory": self.is_statutory,
             "is_part_of_ctc": self.is_part_of_ctc,
             "frequency": self.frequency,
