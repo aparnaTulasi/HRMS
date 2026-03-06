@@ -116,10 +116,28 @@ def seed_defaults():
     # 1. Create Default Leave Types if none exist
     if not LeaveType.query.filter_by(company_id=company_id).first():
         defaults = [
+            # Paid / Regular
+            {'code': 'CL', 'name': 'Casual Leave (CL)', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'SL', 'name': 'Sick Leave (SL)', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'EL', 'name': 'Earned Leave / Privilege Leave (EL/PL)', 'unit': 'DAY', 'is_paid': True},
             {'code': 'AL', 'name': 'Annual Leave', 'unit': 'DAY', 'is_paid': True},
-            {'code': 'SL', 'name': 'Sick Leave', 'unit': 'DAY', 'is_paid': True},
-            {'code': 'CL', 'name': 'Casual Leave', 'unit': 'DAY', 'is_paid': True},
-            {'code': 'LWP', 'name': 'Leave Without Pay', 'unit': 'DAY', 'is_paid': False},
+            {'code': 'CO', 'name': 'Compensatory Off (Comp Off)', 'unit': 'DAY', 'is_paid': True},
+            
+            # Unpaid / Special
+            {'code': 'LWP', 'name': 'Leave Without Pay (LWP)', 'unit': 'DAY', 'is_paid': False},
+            {'code': 'WFH', 'name': 'Work From Home (WFH)', 'unit': 'DAY', 'is_paid': True},
+            
+            # Women / Family
+            {'code': 'ML', 'name': 'Maternity Leave', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'PL', 'name': 'Paternity Leave', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'MAR', 'name': 'Marriage Leave', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'BL', 'name': 'Bereavement Leave', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'MEN', 'name': 'Menstrual Leave', 'unit': 'DAY', 'is_paid': True},
+            
+            # Business / Other
+            {'code': 'OD', 'name': 'On Duty / Official Duty (OD)', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'CMP', 'name': 'Compassionate Leave', 'unit': 'DAY', 'is_paid': True},
+            {'code': 'STU', 'name': 'Study Leave', 'unit': 'DAY', 'is_paid': True},
         ]
         for d in defaults:
             db.session.add(LeaveType(company_id=company_id, **d))
@@ -189,7 +207,18 @@ def create_leave_type():
 @leave_bp.route('/types', methods=['GET'])
 @token_required
 def list_leave_types():
-    types = LeaveType.query.filter_by(company_id=g.user.company_id, is_active=True).all()
+    company_id = request.args.get('company_id')
+    if g.user.role == 'SUPER_ADMIN' and company_id:
+        try:
+            target_company_id = int(company_id)
+        except ValueError:
+            target_company_id = g.user.company_id
+    else:
+        target_company_id = g.user.company_id
+
+    print(f"DEBUG: Fetching leave types for company_id: {target_company_id}")
+    types = LeaveType.query.filter_by(company_id=target_company_id, is_active=True).all()
+    print(f"DEBUG: Found {len(types)} active leave types")
     return jsonify([serialize(t) for t in types]), 200
 
 @leave_bp.route('/types/<int:id>', methods=['GET'])
@@ -590,7 +619,14 @@ def get_employee_holiday_calendar(employee_id):
 @leave_bp.route('/balance', methods=['GET'])
 @token_required
 def get_my_leave_balance():
-    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    # Support Super Admin manual entry
+    employee_id = request.args.get('employee_id', type=int)
+    
+    if g.user.role == 'SUPER_ADMIN' and employee_id:
+        emp = Employee.query.get(employee_id)
+    else:
+        emp = Employee.query.filter_by(user_id=g.user.id).first()
+        
     if not emp:
         return jsonify({'message': 'Employee profile not found'}), 404
 
@@ -926,13 +962,28 @@ def get_leave_audit_report():
     return jsonify(results), 200
 
 @leave_bp.route('/reports/summary', methods=['GET'])
+@leave_bp.route('/history', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR'])
 def get_leave_summary_report():
     from_date_str = request.args.get('from')
     to_date_str = request.args.get('to')
+    company_id = request.args.get('company_id', type=int)
+    employee_id = request.args.get('employee_id', type=int)
     
-    query = LeaveRequest.query.filter_by(company_id=g.user.company_id)
+    # Base query
+    query = LeaveRequest.query
+    
+    # Filter by company: 
+    # If Super Admin, allow all or specific company.
+    # If Admin/HR, restrict to their own company.
+    if g.user.role == 'SUPER_ADMIN':
+        if company_id:
+            query = query.filter(LeaveRequest.company_id == company_id)
+    else:
+        query = query.filter(LeaveRequest.company_id == g.user.company_id)
+        
+    if employee_id:
+        query = query.filter(LeaveRequest.employee_id == employee_id)
     
     if from_date_str:
         from_date = _parse_date(from_date_str)
@@ -950,21 +1001,30 @@ def get_leave_summary_report():
     details = []
     
     for req in leaves:
-        status = req.status if req.status in stats else 'Pending'
-        if status not in stats: stats[status] = 0
-        stats[status] += 1
+        status_key = req.status if req.status in stats else 'Pending'
+        if status_key not in stats: stats[status_key] = 0
+        stats[status_key] += 1
         
         emp = Employee.query.get(req.employee_id)
         lt = LeaveType.query.get(req.leave_type_id)
+        
+        approved_by_name = "System"
+        if req.approved_by:
+            approver = Employee.query.get(req.approved_by)
+            if approver:
+                approved_by_name = f"{approver.first_name} {approver.last_name}"
         
         details.append({
             'id': req.id,
             'employee_name': f"{emp.first_name} {emp.last_name}" if emp else "Unknown",
             'leave_type': lt.name if lt else "Unknown",
+            'leave_type_code': lt.code if lt else "N/A",
             'from_date': req.from_date.isoformat(),
             'to_date': req.to_date.isoformat(),
             'days': (req.to_date - req.from_date).days + 1,
-            'status': req.status
+            'status': req.status,
+            'approved_by': approved_by_name,
+            'applied_on': req.created_at.strftime('%b %d, %Y') if req.created_at else "N/A"
         })
         
     return jsonify({
@@ -979,7 +1039,14 @@ def get_leave_summary_report():
 @leave_bp.route('/mine', methods=['GET'])
 @token_required
 def get_my_leaves():
-    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    # Support Super Admin manual entry
+    employee_id = request.args.get('employee_id', type=int)
+    
+    if g.user.role == 'SUPER_ADMIN' and employee_id:
+        emp = Employee.query.get(employee_id)
+    else:
+        emp = Employee.query.filter_by(user_id=g.user.id).first()
+        
     if not emp:
         return jsonify({'message': 'Employee profile not found'}), 404
 
@@ -1015,14 +1082,24 @@ def get_my_leaves():
 @token_required
 def apply_leave():
     data = request.get_json()
-    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    
+    # Support Super Admin manual entry
+    if g.user.role == 'SUPER_ADMIN' and data.get('employee_id'):
+        emp = Employee.query.get(data['employee_id'])
+    else:
+        emp = Employee.query.filter_by(user_id=g.user.id).first()
+
     if not emp:
         return jsonify({'message': 'Employee profile not found'}), 404
 
     new_leave = LeaveRequest(
-        employee_id=emp.id, company_id=emp.company_id, leave_type_id=data['leave_type_id'],
-        from_date=_parse_date(data['from_date']), to_date=_parse_date(data['to_date']),
-        reason=data.get('reason')
+        employee_id=emp.id, 
+        company_id=data.get('company_id') if g.user.role == 'SUPER_ADMIN' and data.get('company_id') else emp.company_id,
+        leave_type_id=data['leave_type_id'],
+        from_date=_parse_date(data['from_date']), 
+        to_date=_parse_date(data['to_date']),
+        reason=data.get('reason'),
+        status=data.get('status', 'Pending')
     )
     db.session.add(new_leave)
     db.session.commit()
@@ -1070,10 +1147,16 @@ def manage_leave_request(id):
 @token_required
 @role_required(['HR', 'MANAGER', 'ADMIN'])
 def get_pending_approvals():
-    query = LeaveRequest.query.filter_by(
-        company_id=g.user.company_id,
-        status='Pending'
-    )
+    # Support Super Admin cross-company view
+    if g.user.role == 'SUPER_ADMIN' and request.args.get('company_id'):
+        query = LeaveRequest.query.filter_by(company_id=request.args.get('company_id'), status='Pending')
+    elif g.user.role == 'SUPER_ADMIN':
+        query = LeaveRequest.query.filter_by(status='Pending')
+    else:
+        query = LeaveRequest.query.filter_by(
+            company_id=g.user.company_id,
+            status='Pending'
+        )
 
     # Join with LeaveType to get the name for display
     leaves_with_type = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
@@ -1093,7 +1176,7 @@ def get_pending_approvals():
 @role_required(['HR', 'MANAGER', 'ADMIN'])
 def approve_leave(id):
     leave = LeaveRequest.query.get_or_404(id)
-    if leave.company_id != g.user.company_id:
+    if g.user.role != 'SUPER_ADMIN' and leave.company_id != g.user.company_id:
         return jsonify({'message': 'Unauthorized'}), 403
     approver_emp = Employee.query.filter_by(user_id=g.user.id).first()
     data = request.get_json()

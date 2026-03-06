@@ -28,6 +28,8 @@ def role_required(allowed_roles):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            if g.user.role == 'SUPER_ADMIN':
+                return f(*args, **kwargs)
             if g.user.role not in allowed_roles:
                 return jsonify({'message': 'Permission denied'}), 403
             return f(*args, **kwargs)

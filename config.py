@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 from dotenv import load_dotenv  # pyre-ignore[21]
 
 # Load environment variables from .env file (same folder as config.py)
@@ -10,7 +11,22 @@ os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "hrms-secret-key-change-this")
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(INSTANCE_DIR, 'hrms.db')}"
+    
+    # Database Configuration
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    DB_HOST = os.getenv("DB_HOST", "localhost")
+    DB_PORT = os.getenv("DB_PORT", "3306")
+    DB_NAME = os.getenv("DB_NAME")
+
+    if DB_USER and DB_PASSWORD and DB_NAME:
+        # URL encode the password to handle special characters like '@'
+        safe_password = urllib.parse.quote_plus(DB_PASSWORD)
+        SQLALCHEMY_DATABASE_URI = f"mysql+mysqlconnector://{DB_USER}:{safe_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    else:
+        # Fallback to DATABASE_URL or SQLite
+        SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join(INSTANCE_DIR, 'hrms.db')}")
+    
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = os.path.join(BASE_DIR, "uploads")
     BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
