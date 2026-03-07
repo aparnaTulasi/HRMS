@@ -17,6 +17,86 @@ from models.branch import Branch
 from models.payroll import PayGrade
 
 admin_bp = Blueprint('admin', __name__)
+@admin_bp.route('/employees', methods=['GET'])
+@token_required
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+def get_employees():
+    if g.user.role == 'SUPER_ADMIN':
+        employees = Employee.query.all()
+    else:
+        employees = Employee.query.filter_by(company_id=g.user.company_id).all()
+
+    result = []
+    for emp in employees:
+        user = emp.user  # relationship
+        company = Company.query.get(emp.company_id) if emp.company_id else None
+        result.append({
+            'id': emp.id,
+            'employee_id': emp.employee_id,
+            'user': (user.username if user and user.username else None) or
+                    (emp.company_email.split('@')[0] if emp.company_email else (user.email.split('@')[0] if user else '')),
+            'name': emp.full_name or '',
+            'email': emp.company_email or (user.email if user else ''),
+            'dept': emp.department or '',
+            'desig': emp.designation or '',
+            'type': user.role.capitalize() if user else 'Employee',
+            'company': company.company_name if company else 'N/A',
+            'company_id': emp.company_id,
+            'phone': emp.phone_number or '',
+            'status': user.status.capitalize() if user and user.status else 'Active',
+        })
+    return jsonify({'success': True, 'data': result})
+
+@admin_bp.route('/employees/<int:emp_id>', methods=['GET'])
+@token_required
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+def get_employee(emp_id):
+    if g.user.role == 'SUPER_ADMIN':
+        emp = Employee.query.get(emp_id)
+    else:
+        emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+    
+    if not emp:
+        return jsonify({'message': 'Employee not found'}), 404
+        
+    user = emp.user
+    return jsonify({
+        'success': True,
+        'data': {
+            'id': emp.id,
+            'employee_id': emp.employee_id,
+            'full_name': emp.full_name,
+            'email': emp.company_email or (user.email if user else ''),
+            'department': emp.department,
+            'designation': emp.designation,
+            'phone_number': emp.phone_number,
+            'status': user.status if user else 'ACTIVE'
+        }
+    })
+
+@admin_bp.route('/employees/<int:emp_id>', methods=['PUT', 'PATCH'])
+@token_required
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+def update_employee(emp_id):
+    if g.user.role == 'SUPER_ADMIN':
+        emp = Employee.query.get(emp_id)
+    else:
+        emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+        
+    if not emp:
+        return jsonify({'message': 'Employee not found'}), 404
+        
+    data = request.get_json(force=True) or {}
+    # Update employee fields
+    for field in ['full_name', 'department', 'designation', 'phone_number']:
+        if field in data:
+            setattr(emp, field, data[field])
+            
+    if 'status' in data and emp.user:
+        emp.user.status = data['status']
+        
+    db.session.commit()
+    return jsonify({'success': True, 'message': 'Employee updated successfully'})
 
 def _set_if_exists(obj, field, value):
     if value is None:
@@ -80,41 +160,91 @@ def get_dropdown_data():
         }
     }), 200
 
+def _parse_date(date_str):
+    """Parse date flexibly from multiple formats."""
+    if not date_str:
+        return None
+    for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%b %d, %Y'):
+        try:
+            return datetime.strptime(str(date_str).strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+def _resolve_branch_id(data, company_id):
+    """Resolve branch_id from branch_id or branch_name."""
+    branch_id = data.get('branch_id')
+    if branch_id:
+        return int(branch_id) if str(branch_id).isdigit() else None
+    branch_name = data.get('branch_name')
+    if branch_name:
+        from models.branch import Branch
+        branch = Branch.query.filter(
+            Branch.branch_name.ilike(branch_name.strip()),
+            Branch.company_id == company_id
+        ).first()
+        return branch.id if branch else None
+    return None
+
 @admin_bp.route('/create-manager', methods=['POST'])
 @admin_bp.route('/create-employee', methods=['POST'])
 @admin_bp.route('/create-hr', methods=['POST'])
 @token_required
 @role_required(['SUPER_ADMIN', 'ADMIN'])
 def create_employee():
+    try:
+        return _create_employee_impl()
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        import logging
+        logging.error(f'create_employee unhandled: {tb}')
+        return jsonify({
+            'success': False,
+            'message': f'Server Error: {str(e)}',
+            'detail': str(e),
+            'trace': tb[-500:]
+        }), 500
+
+def _create_employee_impl():
     data = request.get_json(force=True) or {}
     if not data:
         return jsonify({'message': 'No input data provided'}), 400
 
-    # 1. Validate Passwords
+    # 1. Validate Password
     password = data.get('password')
-    confirm_password = data.get('confirm_password')
-    if not password or not confirm_password:
-        return jsonify({'message': 'Password and Confirm Password are required'}), 400
-    if password != confirm_password:
-        return jsonify({'message': 'Passwords do not match'}), 400
+    if not password:
+        return jsonify({'message': 'Password is required'}), 400
 
     # 2. Identify Company
-    # Payload sends "company_id": "TC001" (string code)
     req_company_id = data.get('company_id')
+    req_company_name = data.get('company_name')
     company = None
 
     if g.user.role == 'SUPER_ADMIN':
-        if not req_company_id:
-            return jsonify({'message': 'Company ID/Code is required for Super Admin'}), 400
-        
-        # Try finding by code first
-        company = Company.query.filter_by(company_code=req_company_id).first()
-        # Fallback to ID if numeric
-        if not company and str(req_company_id).isdigit():
-            company = Company.query.get(int(req_company_id))
-            
+        if not req_company_id and not req_company_name:
+            return jsonify({'message': 'company_id or company_name is required for Super Admin'}), 400
+
+        if req_company_id:
+            # Try by company_code first, then numeric ID
+            company = Company.query.filter_by(company_code=req_company_id).first()
+            if not company and str(req_company_id).isdigit():
+                company = Company.query.get(int(req_company_id))
+
+        if not company and req_company_name:
+            # Lookup by exact or partial company name (case-insensitive)
+            name_clean = req_company_name.strip()
+            company = Company.query.filter(
+                Company.company_name.ilike(name_clean)
+            ).first()
+            if not company:
+                # Try contains match
+                company = Company.query.filter(
+                    Company.company_name.ilike(f'%{name_clean}%')
+                ).first()
+
         if not company:
-            return jsonify({'message': f'Company not found with identifier: {req_company_id}'}), 404
+            return jsonify({'message': f'Company not found: {req_company_id or req_company_name}'}), 404
     else:
         # ADMIN can only create for their own company
         company = Company.query.get(g.user.company_id)
@@ -131,19 +261,24 @@ def create_employee():
     if User.query.filter_by(email=email).first():
         return jsonify({'message': 'Email already exists'}), 400
 
-    # 4. Determine Role
+    # 4. Determine Role from employee_type or designation
     designation = data.get('designation', '').strip()
+    employee_type = data.get('employee_type', '').strip().upper()
+    username = data.get('username', '').strip() or email.split('@')[0]
+
+    # Map type/designation to role
     role = 'EMPLOYEE'
-    
-    # Map designation to role
-    designation_lower = designation.lower()
-    if 'manager' in designation_lower:
-        role = 'MANAGER'
-    elif 'hr' in designation_lower:
-        role = 'HR'
-    elif 'admin' in designation_lower:
-        role = 'ADMIN'
-    
+    if employee_type in ['MANAGER', 'ADMIN', 'HR', 'SUPER_ADMIN']:
+        role = employee_type
+    else:
+        designation_lower = designation.lower()
+        if 'manager' in designation_lower:
+            role = 'MANAGER'
+        elif 'hr' in designation_lower:
+            role = 'HR'
+        elif 'admin' in designation_lower:
+            role = 'ADMIN'
+
     # 5. Create User Account
     hashed_password = generate_password_hash(password)
     new_user = User(
@@ -153,8 +288,20 @@ def create_employee():
         company_id=company.id,
         status='ACTIVE'
     )
-    db.session.add(new_user)
-    db.session.flush() # Generate ID
+    # Set username if column exists
+    try:
+        new_user.username = username
+    except Exception:
+        pass
+    try:
+        db.session.add(new_user)
+        db.session.flush()  # Generate ID
+    except IntegrityError as e:
+        db.session.rollback()
+        return jsonify({'message': 'Email already registered or duplicate data', 'detail': str(e.orig)}), 409
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'message': 'Error creating user account', 'detail': str(e)}), 500
 
     # 6. Generate Employee ID
     if company.last_user_number is None:
@@ -174,17 +321,16 @@ def create_employee():
         user_id=new_user.id,
         company_id=company.id,
         employee_id=data.get('employee_id') or new_emp_id,
-        full_name=data['full_name'],
+        full_name=full_name,
         department=data.get('department'),
         designation=data.get('designation'),
-        date_of_joining=datetime.strptime(data['date_of_joining'], '%Y-%m-%d').date() if data.get('date_of_joining') else None,
+        date_of_joining=_parse_date(data.get('date_of_joining')),
         gender=data.get('gender'),
         personal_email=data.get('personal_email'),
         pay_grade=data.get('pay_grade'),
-        pay_grade_id=data.get('pay_grade_id'),
         ctc=float(data.get('ctc', 0.0)),
         employment_type=data.get('employment_type'),
-        branch_id=data.get('branch_id'),
+        branch_id=_resolve_branch_id(data, company.id),
         manager_id=data.get('manager_id'),
 
         # ✅ IMPORTANT
@@ -192,19 +338,22 @@ def create_employee():
         company_email=email
     )
     
+    # Save employee to DB first (guaranteed)
     try:
         db.session.add(new_employee)
         db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"message": "Error creating employee record", "error": str(e)}), 500
 
-        # Send emails
-        web_address = build_web_address(company.subdomain)
-        login_url = build_common_login_url(company.subdomain)
+    # Try sending emails - don't fail the whole request if email fails
+    email_sent = False
+    try:
         created_by = "Super Admin" if g.user.role == 'SUPER_ADMIN' else "Admin"
+        web_address = build_web_address(company.subdomain) if company.subdomain else "#"
+        login_url = build_common_login_url(company.subdomain) if company.subdomain else "#"
 
-        # Mail 1: Account Created
         send_account_created_alert(personal_email or email, company.company_name, created_by)
-
-        # Mail 2: Login Credentials
         send_login_credentials(
             personal_email=personal_email or email,
             company_email=email,
@@ -214,14 +363,17 @@ def create_employee():
             login_url=login_url,
             created_by=created_by
         )
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "Error creating record", "error": str(e)}), 500
+        email_sent = True
+    except Exception as email_err:
+        # Log but don't fail - employee is already saved
+        print(f"[WARNING] Email notification failed: {email_err}")
 
     return jsonify({
+        'success': True,
         'message': f'{designation or role} created successfully',
         'employee_id': new_employee.employee_id,
         'company_email': email,
         'personal_email': personal_email,
-        'email_sent': True
+        'email_sent': email_sent,
+        'created_by': g.user.role
     }), 201

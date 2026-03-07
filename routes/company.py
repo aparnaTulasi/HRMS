@@ -512,6 +512,7 @@ def list_branches():
         
         data.append({
             "id": b.id,
+            "company_id": b.company_id,
             "branch_name": b.branch_name,
             "name": b.branch_name,          # Alias for Map UI
             "company_name": c.company_name,

@@ -1,0 +1,5 @@
+USERS_IN_DB: 2
+  - ID: 1, Email: dittakavijaya@gmail.com, Role: SUPER_ADMIN, Username: None
+  - ID: 4, Email: seelamaparnatulasi.7@gmail.com, Role: ADMIN, Username: seelamaparnatulasi@gmail.com
+EMPLOYEES_IN_DB: 1
+  - ID: 1, UserID: 4, Name: Naga Sai Sree, CompID: 1

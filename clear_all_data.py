@@ -1,53 +1,29 @@
-import os
-from flask import Flask
-from models import db
+import sys, os
+sys.path.insert(0, os.path.abspath('.'))
+from sqlalchemy import create_engine, text
 from config import Config
 
-# --- DANGER ZONE ---
-# This script will permanently delete all data in your database.
-# Do not run this in a production environment.
+engine = create_engine(Config.SQLALCHEMY_DATABASE_URI)
 
-def main():
-    """
-    Initializes a temporary Flask app to gain an application context,
-    then drops all database tables and recreates them.
-    """
-    # Create a temporary Flask app instance
-    app = Flask(__name__)
-    # Load configuration from your config.py file
-    app.config.from_object(Config)
+with engine.connect() as conn:
+    # Disable FK checks for clean truncate
+    conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
 
-    # Associate the SQLAlchemy object with the app
-    db.init_app(app)
+    # Get all tables
+    result = conn.execute(text("SHOW TABLES"))
+    tables = [row[0] for row in result.fetchall()]
+    print(f"Found {len(tables)} tables: {tables}")
 
-    with app.app_context():
-        print("--- WARNING: This script will delete all data in your database. ---")
-        confirm = input("Are you sure you want to proceed? Type 'yes' to continue: ")
-
-        if confirm.lower() != 'yes':
-            print("Operation cancelled.")
-            return
-
-        print("\n[1/3] Dropping all database tables...")
+    for table in tables:
         try:
-            # Import all your models here so SQLAlchemy knows about them
-            # when calling db.create_all(). This is a crucial step.
-            from models.user import User
-            from models.company import Company
-            from models.employee import Employee
-            from models.department import Department
-            # Add any other models you have created here
-
-            db.drop_all()
-            print("[2/3] All tables dropped successfully.")
-
-            db.create_all()
-            print("[3/3] All tables recreated successfully based on current models.")
-            print("\n✅ Database has been reset to a clean state.")
-
+            conn.execute(text(f"TRUNCATE TABLE `{table}`"))
+            print(f"  ✅ Cleared: {table}")
         except Exception as e:
-            print(f"\n❌ An error occurred: {e}")
-            print("Operation failed. Your database might be in an inconsistent state.")
+            print(f"  ⚠️  Skipped {table}: {e}")
 
-if __name__ == '__main__':
-    main()
+    # Re-enable FK checks
+    conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
+    conn.commit()
+
+print("\n✅ All tables cleared. Database is now empty.")
+print("   Re-create super admin via signup or seed script.")
