@@ -43,7 +43,7 @@ try:
 except ImportError:
     normalize_prefix = lambda x: x # Fallback if file missing
 
-from utils.jwt_auth import jwt_required  # pyre-ignore[21]
+from utils.decorators import token_required, role_required
 
 
 company_bp = Blueprint("company_bp", __name__)
@@ -62,7 +62,7 @@ def require_super_admin():
         return jsonify({"success": False, "message": "Authentication required"}), 401
 
     role = (getattr(user, "role", "") or "").upper()
-    if role not in ["SUPER_ADMIN", "SUPERADMIN", "SUPER-ADMIN"]:
+    if role != "SUPER_ADMIN":
         return jsonify({"success": False, "message": "Forbidden: Super Admin only"}), 403
 
     return None
@@ -74,7 +74,7 @@ def require_hr_access():
         return jsonify({"success": False, "message": "Authentication required"}), 401
 
     role = (getattr(user, "role", "") or "").upper()
-    if role not in ["HR_MANAGER", "HR_EXECUTIVE"]:
+    if role != "HR":
         return jsonify({"success": False, "message": "Forbidden: HR access only"}), 403
 
     return None
@@ -111,9 +111,9 @@ def normalize_role(role: str) -> str:
     if r == "USER":
         return "EMPLOYEE"
     if r == "ADMIN":
-        return "COMPANY_ADMIN"
+        return "ADMIN"
     if r == "HR":
-        return "HR_MANAGER"
+        return "HR"
 
     r = r.replace(" ", "_")
     return r
@@ -141,8 +141,8 @@ def create_user_and_email(company_id: int, email: str, role: str, name: str = ""
     role = normalize_role(role)
     allowed = [
         "SUPER_ADMIN", 
-        "COMPANY_ADMIN", 
-        "HR_MANAGER", "HR_EXECUTIVE", 
+        "ADMIN", 
+        "HR", "HR_EXECUTIVE", 
         "MANAGER", "TEAM_LEAD", 
         "EMPLOYEE", 
         "FINANCE_ADMIN", "PAYROLL_ADMIN", 
@@ -205,25 +205,35 @@ def create_user_and_email(company_id: int, email: str, role: str, name: str = ""
 # ----------------------------
 @company_bp.route("/companies", methods=["POST"])
 @company_bp.route("/create-company", methods=["GET", "POST"])
+@token_required
+@role_required(["SUPER_ADMIN"])
 def create_company():
     # Fallback: if GET is used, we return the list of companies (same as list_companies)
     # This prevents 405 error if frontend calls GET on /create-company
     if request.method == "GET":
         return list_companies()
 
-    # guard = require_super_admin()
-    # if guard:
-    #     return guard
+    guard = require_super_admin()
+    if guard:
+        return guard
 
     print("AUTH HEADER:", request.headers.get("Authorization"))
 
     data = request.get_json(silent=True) or {}
 
-    company_name = (data.get("company_name") or "").strip()
+    company_name = (data.get("company_name") or data.get("name") or "").strip()
 
     # UI sends company_Id (FS001). DB column is company_code.
     company_code = (data.get("company_Id") or data.get("company_code") or "").strip().upper()
     company_prefix = (data.get("company_prefix") or "").strip().upper()
+
+    # If prefix is missing, try to auto-generate from name (e.g. "Google" -> "GOO")
+    if not company_prefix and company_name:
+        parts = company_name.split()
+        if len(parts) >= 2:
+            company_prefix = (parts[0][0] + parts[1][0]).upper()
+        else:
+            company_prefix = company_name[:3].upper()
 
     industry = (data.get("industry") or "").strip()
     company_size = (data.get("company_size") or "").strip()
@@ -233,7 +243,7 @@ def create_company():
     timezone = (data.get("timezone") or "Asia/Kolkata").strip()
 
     missing = []
-    if not company_name: missing.append("company_name")
+    if not company_name: missing.append("company_name (or name)")
     if not company_code: missing.append("company_Id (company code like FS001)")
     if not industry: missing.append("industry")
     if not company_prefix: missing.append("company_prefix")
@@ -418,7 +428,8 @@ def create_company():
 # ----------------------------
 
 @company_bp.route("/branches", methods=["POST"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def create_branch():
     guard = require_super_admin()
     if guard: return guard
@@ -462,7 +473,8 @@ def create_branch():
 
 
 @company_bp.route("/branches", methods=["GET"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def list_branches():
     guard = require_super_admin()
     if guard: return guard
@@ -517,7 +529,8 @@ def list_branches():
 
 
 @company_bp.route("/branches/<int:branch_id>", methods=["GET"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def get_branch(branch_id):
     guard = require_super_admin()
     if guard: return guard
@@ -547,7 +560,8 @@ def get_branch(branch_id):
 
 
 @company_bp.route("/branches/<int:branch_id>", methods=["PUT"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def update_branch(branch_id):
     guard = require_super_admin()
     if guard: return guard
@@ -577,7 +591,8 @@ def update_branch(branch_id):
 
 
 @company_bp.route("/branches/<int:branch_id>", methods=["DELETE"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def delete_branch(branch_id):
     guard = require_super_admin()
     if guard: return guard
@@ -599,7 +614,8 @@ def delete_branch(branch_id):
 
 
 @company_bp.route("/branches/<int:branch_id>/toggle-status", methods=["PUT"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def toggle_branch_status(branch_id):
     guard = require_super_admin()
     if guard: return guard
@@ -617,7 +633,8 @@ def toggle_branch_status(branch_id):
 
 
 @company_bp.route("/branches/map", methods=["GET"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def get_branch_map():
     guard = require_super_admin()
     if guard: return guard
@@ -661,7 +678,8 @@ def get_branch_map():
 # GET /api/superadmin/companies
 # ----------------------------
 @company_bp.route("/companies", methods=["GET"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def list_companies():
     guard = require_super_admin()
     if guard:
@@ -703,7 +721,8 @@ def list_companies():
 # GET /api/superadmin/companies/<id>
 # ----------------------------
 @company_bp.route("/companies/<int:company_id>", methods=["GET"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def get_company(company_id):
     guard = require_super_admin()
     if guard:
@@ -739,7 +758,8 @@ def get_company(company_id):
 # PUT /api/superadmin/companies/<id>
 # ----------------------------
 @company_bp.route("/companies/<int:company_id>", methods=["PUT"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def update_company(company_id):
     guard = require_super_admin()
     if guard:
@@ -782,7 +802,8 @@ def update_company(company_id):
 # DELETE /api/superadmin/companies/<id>
 # ----------------------------
 @company_bp.route("/companies/<int:company_id>", methods=["DELETE"])
-@jwt_required
+@token_required
+@role_required(["SUPER_ADMIN"])
 def delete_company(company_id):
     guard = require_super_admin()
     if guard:
@@ -806,7 +827,7 @@ def delete_company(company_id):
 # POST /api/superadmin/companies/<id>/users
 # ----------------------------
 @company_bp.route("/companies/<int:company_id>/users", methods=["POST"])
-@jwt_required
+@token_required
 def add_users_to_company(company_id):
     # RESTRICTION: Only HR can perform CRUD on employees.
     # Super Admin, Admin, Manager are NOT allowed.

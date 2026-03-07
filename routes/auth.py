@@ -22,45 +22,55 @@ def super_admin_signup():
     data = request.get_json(silent=True)
     print(f"🔹 Payload: {data}", flush=True)
 
-    if not data:
-        return jsonify({'message': 'Invalid JSON or Content-Type header'}), 400
+    try:
+        if not data:
+            return jsonify({'message': 'Invalid JSON or Content-Type header'}), 400
 
-    if not data.get('email') or not data.get('password'):
-        return jsonify({'message': 'Email and password are required'}), 400
+        if not data.get('email') or not data.get('password'):
+            return jsonify({'message': 'Email and password are required'}), 400
 
-    email = data['email'].lower().strip()
-    if User.query.filter_by(email=email).first():
-        return jsonify({'message': 'Email already exists'}), 400
+        email = data['email'].lower().strip()
+        
+        # Check both User and SuperAdmin tables
+        if User.query.filter_by(email=email).first() or SuperAdmin.query.filter_by(email=email).first():
+            return jsonify({'message': 'Email already exists'}), 400
 
-    hashed_password = generate_password_hash(data['password'])
+        hashed_password = generate_password_hash(data['password'])
 
-    # 1. Create User (Inactive initially)
-    user = User(
-        email=email,
-        password=hashed_password,
-        role='SUPER_ADMIN',
-        status='PENDING'
-    )
-    db.session.add(user)
-    db.session.flush() # Flush to get user.id
+        # 1. Create User (Inactive initially)
+        user = User(
+            email=email,
+            password=hashed_password,
+            role='SUPER_ADMIN',
+            status='PENDING'
+        )
+        db.session.add(user)
+        db.session.flush() # Flush to get user.id
 
-    # 2. Create SuperAdmin Profile with OTP
-    sa = SuperAdmin(
-        user_id=user.id,
-        email=email,
-        password=hashed_password,
-        first_name=data.get('first_name'),
-        last_name=data.get('last_name')
-    )
-    otp = sa.generate_signup_otp()
-    db.session.add(sa)
+        # 2. Create SuperAdmin Profile with OTP
+        sa = SuperAdmin(
+            user_id=user.id,
+            email=email,
+            password=hashed_password,
+            first_name=data.get('first_name'),
+            last_name=data.get('last_name')
+        )
+        otp = sa.generate_signup_otp()
+        db.session.add(sa)
 
-    db.session.commit()
+        db.session.commit()
 
-    if send_signup_otp(email, otp):
-        return jsonify({'message': 'Signup successful. OTP sent to email.'}), 201
-    else:
-        return jsonify({'message': 'Signup successful, but failed to send OTP email.'}), 201
+        if send_signup_otp(email, otp):
+            return jsonify({'message': 'Signup successful. OTP sent to email.'}), 201
+        else:
+            return jsonify({'message': 'Signup successful, but failed to send OTP email.'}), 201
+            
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Signup Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'message': 'Internal Server Error', 'error': str(e)}), 500
 
 @auth_bp.route('/super-admin/verify-otp', methods=['POST'])
 def verify_super_admin_otp():
@@ -261,15 +271,10 @@ def login():
         'email': user.email,
         'role': user.role,
         'status': user.status,
+        'name': user.name,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None,
     }
-    if employee:
-        user_data.update({
-            'employee_id': employee.id,
-            'employee_code': employee.employee_id,
-            'employee_name': employee.full_name, # Now a column, not a property
-        })
 
     # Determine Redirect URL
     base_url = build_company_base_url("")
@@ -306,15 +311,10 @@ def get_current_user():
         'email': user.email,
         'role': user.role,
         'status': user.status,
+        'name': user.name,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None,
     }
-    if employee:
-        user_data.update({
-            'employee_id': employee.id,
-            'employee_code': employee.employee_id,
-            'employee_name': employee.full_name,
-        })
 
     return jsonify(user_data), 200
 

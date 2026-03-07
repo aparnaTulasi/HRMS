@@ -19,6 +19,7 @@ class Employee(db.Model):
     employment_type = db.Column(db.String(50))
     manager_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=True)
     pay_grade = db.Column(db.String(50))
+    branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=True)
     ctc = db.Column(db.Float, default=0.0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -26,6 +26,20 @@ class User(UserMixin, db.Model):
     permissions = db.relationship('UserPermission', foreign_keys='UserPermission.user_id', backref=db.backref('user', foreign_keys='UserPermission.user_id'), lazy=True)
 
     __table_args__ = (db.UniqueConstraint('company_id', 'email', name='unique_company_email'),)
+
+    @property
+    def name(self):
+        """Returns the full name of the user based on their profile."""
+        if self.role == 'SUPER_ADMIN' and hasattr(self, 'super_admin') and self.super_admin:
+            first = self.super_admin.first_name or ""
+            last = self.super_admin.last_name or ""
+            return f"{first} {last}".strip() or "Super Admin"
+        
+        if self.employee_profile:
+            return self.employee_profile.full_name or "Employee"
+            
+        return "User"
+
     def generate_otp(self):
         self.otp = ''.join(secrets.choice('0123456789') for _ in range(6))
         self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)

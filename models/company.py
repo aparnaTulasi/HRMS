@@ -22,6 +22,8 @@ class Company(db.Model):
     phone = db.Column(db.String(50))
     email = db.Column(db.String(120))
     status = db.Column(db.String(50), default="Active")
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -1,13 +1,25 @@
-from flask import Flask, request, jsonify
 import logging
+import os
 from datetime import timedelta
 import re
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from models import db
 from config import Config
 from flask_migrate import Migrate
 
+# ✅ Enable Logging at the very start
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]',
+    handlers=[
+        logging.FileHandler("backend_error.log"),
+        logging.StreamHandler()
+    ]
+)
+
 # Import Blueprints
+# ... (rest of imports)
 from routes.auth import auth_bp
 from routes.admin import admin_bp
 from routes.superadmin import superadmin_bp
@@ -20,52 +32,44 @@ from routes.user import user_bp
 from routes.policies import policies_bp
 from leave import leave_bp
 from routes.approvals import approvals_bp
-from routes.company import company_bp # Corrected import
+from routes.company import company_bp
 from routes.hr_documents import hr_docs_bp
 from routes.profile_routes import profile_bp
 
-# Ensure UserPermission model is imported so SQLAlchemy can resolve the relationship in User model.
 from models.user_permission import UserPermission
-# Ensure Department model is imported so SQLAlchemy can resolve the relationship in Company model.
 from models.department import Department
-# Ensure Designation model is imported so SQLAlchemy can resolve the relationship in Company/Employee model.
 from models.designation import Designation
-# Ensure BankDetails model is imported so SQLAlchemy can resolve the relationship in Employee model.
 from models.bank_details import BankDetails
-# Ensure Branch model is imported for Flask-Migrate
 from models.branch import Branch
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# ✅ Enable Request Logging (To see if frontend is connecting)
-logging.basicConfig(level=logging.DEBUG)
-
 @app.before_request
 def log_request_info():
     app.logger.info(f"📡 Incoming Request: {request.method} {request.url} | Origin: {request.headers.get('Origin')}")
-    print(f"📡 HIT: {request.method} {request.url}")  # Force print to terminal
+    print(f"📡 HIT: {request.method} {request.url}", flush=True)
 
 app.config["SECRET_KEY"] = Config.SECRET_KEY
 app.config["SESSION_PERMANENT"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=10)
 
+# ✅ Unified CORS Configuration
 CORS(
     app,
-    resources={r"/api/*": {
+    resources={r"/*": {
         "origins": [
-            "http://localhost:5173",      # Vite
-            "http://localhost:5174",      # Vite (alternative port)
+            "http://localhost:5173",
             "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174",
-            "http://localhost:3000",      # For Create React App
-            re.compile(r"^http://192\.168\..*:\d+$")  # Any local network IP on any port
+            "http://192.168.1.15:5173",
+            "http://192.168.0.110:5173",
+            "http://192.168.1.33:5173",
+            re.compile(r"^http://192\.168\..*:\d+$")
         ]
     }},
     allow_headers=["Content-Type", "Authorization"],
     supports_credentials=True
 )
-CORS(app, resources={r"/*": {"origins": "*"}})
 
 db.init_app(app)
 migrate = Migrate(app, db)

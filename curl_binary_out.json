@@ -1,0 +1,152 @@
+[
+  {
+    "allow_half_day": true,
+    "code": "AL",
+    "company_id": 1,
+    "id": 4,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Annual Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": false,
+    "code": "BL",
+    "company_id": 1,
+    "id": 11,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Bereavement Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "CL",
+    "company_id": 1,
+    "id": 1,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Casual Leave (CL)",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "CMP",
+    "company_id": 1,
+    "id": 14,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Compassionate Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "CO",
+    "company_id": 1,
+    "id": 5,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Compensatory Off (Comp Off)",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "EL",
+    "company_id": 1,
+    "id": 3,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Earned Leave / Privilege Leave (EL/PL)",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "LWP",
+    "company_id": 1,
+    "id": 6,
+    "is_active": true,
+    "is_paid": false,
+    "name": "Leave Without Pay (LWP)",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": false,
+    "code": "MAR",
+    "company_id": 1,
+    "id": 10,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Marriage Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "MEN",
+    "company_id": 1,
+    "id": 12,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Menstrual Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": false,
+    "code": "ML",
+    "company_id": 1,
+    "id": 8,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Maternity Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "OD",
+    "company_id": 1,
+    "id": 13,
+    "is_active": true,
+    "is_paid": true,
+    "name": "On Duty / Official Duty (OD)",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": false,
+    "code": "PL",
+    "company_id": 1,
+    "id": 9,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Paternity Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "SL",
+    "company_id": 1,
+    "id": 2,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Sick Leave (SL)",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": false,
+    "code": "STU",
+    "company_id": 1,
+    "id": 15,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Study Leave",
+    "unit": "DAY"
+  },
+  {
+    "allow_half_day": true,
+    "code": "WFH",
+    "company_id": 1,
+    "id": 7,
+    "is_active": true,
+    "is_paid": true,
+    "name": "Work From Home (WFH)",
+    "unit": "DAY"
+  }
+]

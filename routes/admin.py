@@ -11,6 +11,10 @@ from datetime import datetime
 import re
 from utils.email_utils import send_login_credentials, send_account_created_alert
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
+from models.department import Department
+from models.designation import Designation
+from models.branch import Branch
+from models.payroll import PayGrade
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -36,6 +40,45 @@ def generate_employee_id(company_code: str) -> str:
     last_num = int(m.group(1)) if m else 0
     new_num = last_num + 1
     return f"{company_code}-{new_num:04d}"
+
+@admin_bp.route('/dropdown-data', methods=['GET'])
+@token_required
+@role_required(['SUPER_ADMIN', 'ADMIN'])
+def get_dropdown_data():
+    company_id = g.user.company_id
+    
+    # If Super Admin, they might want all companies or a specific one? 
+    # Usually dropdowns are context specific.
+    
+    departments = Department.query.filter_by(company_id=company_id).all()
+    designations = Designation.query.filter_by(company_id=company_id).all()
+    branches = Branch.query.filter_by(company_id=company_id).all()
+    paygrades = PayGrade.query.filter_by(company_id=company_id, status='ACTIVE').all()
+    
+    # Managers: Users with MANAGER role in this company
+    managers = Employee.query.join(User).filter(
+        User.company_id == company_id,
+        User.role == 'MANAGER'
+    ).all()
+    
+    # Eligible Users: Users who don't have an employee profile yet
+    eligible_users = User.query.filter(
+        User.company_id == company_id,
+        User.employee_profile == None
+    ).all()
+
+    return jsonify({
+        "success": true,
+        "data": {
+            "departments": [{"id": d.id, "name": d.department_name} for d in departments],
+            "designations": [{"id": d.id, "name": d.designation_name} for d in designations],
+            "branches": [{"id": b.id, "name": b.branch_name} for b in branches],
+            "paygrades": [{"id": p.id, "name": p.grade_name} for p in paygrades],
+            "managers": [{"id": m.id, "name": m.full_name} for m in managers],
+            "users": [{"id": u.id, "email": u.email} for u in eligible_users],
+            "employment_types": ["Full-time", "Part-time", "Intern", "Contract", "Freelance"]
+        }
+    }), 200
 
 @admin_bp.route('/create-manager', methods=['POST'])
 @admin_bp.route('/create-employee', methods=['POST'])
@@ -138,7 +181,11 @@ def create_employee():
         gender=data.get('gender'),
         personal_email=data.get('personal_email'),
         pay_grade=data.get('pay_grade'),
+        pay_grade_id=data.get('pay_grade_id'),
         ctc=float(data.get('ctc', 0.0)),
+        employment_type=data.get('employment_type'),
+        branch_id=data.get('branch_id'),
+        manager_id=data.get('manager_id'),
 
         # ✅ IMPORTANT
         phone_number=data.get('phone_number') or data.get('mobile_number'),

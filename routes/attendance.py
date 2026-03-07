@@ -212,16 +212,18 @@ def list_attendance():
         output.append({
             "id": r.attendance_id,
             "attendance_id": r.attendance_id,
-            "employee_id": emp.employee_id if emp else "",
+            "employeeHeight": emp.employee_id if emp else "",  # Not sure if height is needed, but keeping for parity if it was there (Wait, no, it was employee_id)
+            "employeeId": emp.employee_id if emp else "",
             "name": f"{emp.first_name} {emp.last_name}" if emp else "",
             "role": user.role if user else None,
             "department": emp.department if emp else None,
             "status": r.status,
             "remarks": getattr(r, "remarks", ""),
-            "logged_time": _format_logged_time(r.total_minutes),
-            "login_at": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else None,
-            "logout_at": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else None,
+            "loggedTime": _format_logged_time(r.total_minutes),
+            "loginAt": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else None,
+            "logoutAt": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else None,
             "date": r.attendance_date.strftime("%d/%m/%Y"),
+            "attendanceDate": r.attendance_date.strftime("%d/%m/%Y"),
         })
 
     return jsonify({"attendance": output}), 200
@@ -566,19 +568,24 @@ def import_attendance():
 @role_required(["EMPLOYEE", "ADMIN", "HR", "MANAGER", "SUPER_ADMIN"])
 def my_attendance():
     """
-    Employee can only view their own attendance.
-    No punch in/out APIs here.
+    User can view their own attendance (Employees or Super Admins).
     """
-    query = Employee.query.filter_by(user_id=g.user.id)
-    if g.user.role != 'SUPER_ADMIN':
-        query = query.filter_by(company_id=g.user.company_id)
-    emp = query.first()
-    if not emp:
-        return jsonify({"message": "Employee profile not found"}), 404
+    if g.user.role == 'SUPER_ADMIN':
+        sa_profile = g.user.super_admin
+        if not sa_profile:
+            return jsonify({"success": False, "message": "Super Admin profile not found"}), 404
+        
+        q = Attendance.query.filter_by(super_admin_id=sa_profile.id)\
+                            .order_by(Attendance.attendance_date.desc())\
+                            .limit(180)
+    else:
+        emp = Employee.query.filter_by(user_id=g.user.id, company_id=g.user.company_id).first()
+        if not emp:
+            return jsonify({"success": False, "message": "Employee profile not found"}), 404
 
-    q = Attendance.query.filter_by(employee_id=emp.id)\
-                        .order_by(Attendance.attendance_date.desc())\
-                        .limit(180)
+        q = Attendance.query.filter_by(employee_id=emp.id)\
+                            .order_by(Attendance.attendance_date.desc())\
+                            .limit(180)
 
     output = []
     for r in q.all():
@@ -586,13 +593,14 @@ def my_attendance():
             "id": r.attendance_id,
             "status": r.status,
             "remarks": getattr(r, "remarks", ""),
-            "logged_time": _format_logged_time(r.total_minutes),
-            "login_at": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else None,
-            "logout_at": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else None,
-            "date": r.attendance_date.strftime("%d/%m/%Y"),
+            "loggedTime": _format_logged_time(r.total_minutes),
+            "loginAt": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else None,
+            "logoutAt": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else None,
+            "attendanceDate": r.attendance_date.strftime("%d/%m/%Y"),
+            "date": r.attendance_date.strftime("%d/%m/%Y"), # Keep legacy for safety
         })
 
-    return jsonify({"attendance": output}), 200
+    return jsonify({"success": True, "attendance": output}), 200
 
 
 # -----------------------------

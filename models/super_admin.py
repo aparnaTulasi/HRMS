@@ -12,6 +12,11 @@ class SuperAdmin(db.Model):
 
     first_name = db.Column(db.String(50))
     last_name = db.Column(db.String(50))
+    phone_number = db.Column(db.String(20))
+    gender = db.Column(db.String(20))
+    date_of_birth = db.Column(db.Date)
+    address = db.Column(db.Text)
+    designation = db.Column(db.String(100), default="Super Admin")
 
     is_verified = db.Column(db.Boolean, default=False)
 

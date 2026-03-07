@@ -10,7 +10,8 @@ class Attendance(db.Model):
     attendance_id = db.Column(db.Integer, primary_key=True)
 
     company_id = db.Column(db.Integer, db.ForeignKey("companies.id"), nullable=False, index=True)
-    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False, index=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=True, index=True)
+    super_admin_id = db.Column(db.Integer, db.ForeignKey("super_admins.id"), nullable=True, index=True)
 
     # Main unique key for UPSERT
     attendance_date = db.Column(db.Date, nullable=False, index=True)
@@ -38,7 +39,7 @@ class Attendance(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint("company_id", "employee_id", "attendance_date", name="uq_att_company_emp_date"),
+        db.UniqueConstraint("company_id", "employee_id", "super_admin_id", "attendance_date", name="uq_att_company_emp_sa_date"),
     )
 
     @property
