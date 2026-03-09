@@ -24,6 +24,12 @@ class Employee(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Audit columns: store who created/updated/deleted — NOT shown in UI
+    # created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    # updated_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    # deleted_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    # is_deleted = db.Column(db.Boolean, default=False)
+
     bank_details = db.relationship('EmployeeBankDetails', backref='employee', uselist=False, lazy=True)
     address = db.relationship('EmployeeAddress', backref='employee', uselist=False, lazy=True)
     documents = db.relationship('EmployeeDocument', backref='employee', lazy=True)

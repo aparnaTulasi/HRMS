@@ -64,7 +64,10 @@ CORS(
             "http://192.168.1.15:5173",
             "http://192.168.0.110:5173",
             "http://192.168.1.33:5173",
-            re.compile(r"^http://192\.168\..*:\d+$")
+            "http://192.168.56.1:5173",
+            re.compile(r"^http://192\.168\..*:\d+$"),
+            re.compile(r"^http://localhost:\d+$"),
+            re.compile(r"^http://127\.0\.0\.1:\d+$")
         ]
     }},
     allow_headers=["Content-Type", "Authorization"],

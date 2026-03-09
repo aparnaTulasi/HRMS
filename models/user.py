@@ -23,7 +23,7 @@ class User(UserMixin, db.Model):
     otp_expiry = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    employee_profile = db.relationship('Employee', backref='user', uselist=False, lazy=True)
+    employee_profile = db.relationship('Employee', foreign_keys='Employee.user_id', backref=db.backref('user', foreign_keys='Employee.user_id'), uselist=False, lazy=True)
     permissions = db.relationship('UserPermission', foreign_keys='UserPermission.user_id', backref=db.backref('user', foreign_keys='UserPermission.user_id'), lazy=True)
 
     __table_args__ = (db.UniqueConstraint('company_id', 'email', name='unique_company_email'),)

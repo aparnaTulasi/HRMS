@@ -9,6 +9,7 @@ from models.company import Company
 from utils.decorators import token_required, role_required
 from datetime import datetime
 import re
+import logging
 from utils.email_utils import send_login_credentials, send_account_created_alert
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 from models.department import Department
@@ -19,10 +20,13 @@ from models.payroll import PayGrade
 admin_bp = Blueprint('admin', __name__)
 @admin_bp.route('/employees', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN', 'EMPLOYEE'])
 def get_employees():
     if g.user.role == 'SUPER_ADMIN':
         employees = Employee.query.all()
+    elif g.user.role == 'EMPLOYEE':
+        # Employee can only see their own record
+        employees = Employee.query.filter_by(user_id=g.user.id).all()
     else:
         employees = Employee.query.filter_by(company_id=g.user.company_id).all()
 
@@ -49,15 +53,17 @@ def get_employees():
 
 @admin_bp.route('/employees/<int:emp_id>', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@role_required(['ADMIN', 'HR', 'SUPER_ADMIN', 'EMPLOYEE'])
 def get_employee(emp_id):
     if g.user.role == 'SUPER_ADMIN':
         emp = Employee.query.get(emp_id)
+    elif g.user.role == 'EMPLOYEE':
+        emp = Employee.query.filter_by(id=emp_id, user_id=g.user.id).first()
     else:
         emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
     
     if not emp:
-        return jsonify({'message': 'Employee not found'}), 404
+        return jsonify({'message': 'Employee not found or unauthorized'}), 404
         
     user = emp.user
     return jsonify({
@@ -74,6 +80,43 @@ def get_employee(emp_id):
         }
     })
 
+@admin_bp.route('/employees/<int:emp_id>', methods=['DELETE'])
+@token_required
+@role_required(['ADMIN', 'SUPER_ADMIN'])
+def delete_employee(emp_id):
+    """Permanently delete an employee and their user account from the database."""
+    try:
+        if g.user.role == 'SUPER_ADMIN':
+            emp = Employee.query.get(emp_id)
+        else:
+            # ADMIN can only delete from their own company
+            emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
+
+        if not emp:
+            return jsonify({'success': False, 'message': 'Employee not found or unauthorized'}), 404
+
+        emp_name = emp.full_name
+        user_id = emp.user_id
+
+        # Permanently delete the employee profile first (child record)
+        db.session.delete(emp)
+        db.session.flush()
+
+        # Then permanently delete the user account (parent record)
+        if user_id:
+            user = User.query.get(user_id)
+            if user:
+                db.session.delete(user)
+
+        db.session.commit()
+        return jsonify({'success': True, 'message': f'Employee "{emp_name}" permanently deleted.'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        logging.error(f'delete_employee error: {traceback.format_exc()}')
+        return jsonify({'success': False, 'message': f'Delete failed: {str(e)}'}), 500
+
 @admin_bp.route('/employees/<int:emp_id>', methods=['PUT', 'PATCH'])
 @token_required
 @role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
@@ -88,13 +131,13 @@ def update_employee(emp_id):
         
     data = request.get_json(force=True) or {}
     # Update employee fields
-    for field in ['full_name', 'department', 'designation', 'phone_number']:
+    for field in ['full_name', 'department', 'designation', 'phone_number', 'personal_email']:
         if field in data:
             setattr(emp, field, data[field])
             
     if 'status' in data and emp.user:
         emp.user.status = data['status']
-        
+    
     db.session.commit()
     return jsonify({'success': True, 'message': 'Employee updated successfully'})
 
@@ -247,9 +290,16 @@ def _create_employee_impl():
             return jsonify({'message': f'Company not found: {req_company_id or req_company_name}'}), 404
     else:
         # ADMIN can only create for their own company
-        company = Company.query.get(g.user.company_id)
+        admin_company_id = g.user.company_id
+        try:
+            # Handle potential string/int mismatch
+            cid_int = int(admin_company_id) if admin_company_id else None
+            company = Company.query.get(cid_int)
+        except (ValueError, TypeError):
+            company = None
+
         if not company:
-            return jsonify({'message': 'Admin company context not found'}), 404
+            return jsonify({'message': f'Admin company context not found (ID: {admin_company_id})'}), 404
 
     # 3. Check Email Uniqueness
     email = data.get('email') or data.get('company_email')
@@ -332,8 +382,6 @@ def _create_employee_impl():
         employment_type=data.get('employment_type'),
         branch_id=_resolve_branch_id(data, company.id),
         manager_id=data.get('manager_id'),
-
-        # ✅ IMPORTANT
         phone_number=data.get('phone_number') or data.get('mobile_number'),
         company_email=email
     )
