@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, g
 from utils.decorators import token_required
 from models.audit_log import AuditLog
+from models.user import User
 from models import db
 
 audit_bp = Blueprint("audit", __name__)
@@ -13,7 +14,7 @@ def get_audit_logs():
     if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
         return jsonify({"message": "Unauthorized"}), 403
 
-    query = AuditLog.query
+    query = db.session.query(AuditLog, User).outerjoin(User, AuditLog.user_id == User.id)
 
     # company isolation
     if g.user.role != "SUPER_ADMIN":
@@ -31,26 +32,38 @@ def get_audit_logs():
     limit = int(request.args.get("limit", 20))
 
     pagination = query.order_by(AuditLog.created_at.desc()) \
-                      .paginate(page=page, per_page=limit, error_out=False)
+                       .paginate(page=page, per_page=limit, error_out=False)
+
+    data = []
+    for log, user in pagination.items:
+        # Resolve performer name
+        performer_name = "System"
+        if user:
+            performer_name = user.name
+        elif log.user_id:
+            performer_name = f"User {log.user_id}"
+
+        data.append({
+            "id": log.id,
+            "user_id": log.user_id,
+            "performer_name": performer_name,
+            "role": log.role or (user.role if user else "SYSTEM"),
+            "action": log.action,
+            "entity": log.entity,
+            "entity_id": log.entity_id,
+            "method": log.method or "N/A",
+            "path": log.path or "N/A",
+            "status_code": log.status_code,
+            "ip_address": log.ip_address or "N/A",
+            "created_at": log.created_at.isoformat() if log.created_at else None
+        })
 
     return jsonify({
         "success": True,
         "page": page,
         "limit": limit,
         "total": pagination.total,
-        "data": [{
-            "id": l.id,
-            "user_id": l.user_id,
-            "role": l.role,
-            "action": l.action,
-            "entity": l.entity,
-            "entity_id": l.entity_id,
-            "method": l.method,
-            "path": l.path,
-            "status_code": l.status_code,
-            "ip_address": l.ip_address,
-            "created_at": l.created_at
-        } for l in pagination.items]
+        "data": data
     })
 
 

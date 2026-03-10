@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, g
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import csv
 import io
 
@@ -7,15 +7,50 @@ from models import db
 from models.attendance import Attendance, AttendanceRegularization
 from models.employee import Employee
 from models.user import User
+from models.shift import Shift, ShiftAssignment
 from utils.decorators import token_required, role_required
+from utils.audit_logger import log_action
+
+from sqlalchemy import func
 
 attendance_bp = Blueprint("attendance", __name__)
+
+@attendance_bp.route("/shifts", methods=["GET"])
+@token_required
+def get_shifts():
+    if g.user.role == "SUPER_ADMIN":
+        shifts = Shift.query.all()
+    else:
+        shifts = Shift.query.filter_by(company_id=g.user.company_id, is_active="Yes").all()
+    
+    output = []
+    today = date.today()
+    for s in shifts:
+        # Count active assignments for this shift
+        count = db.session.query(func.count(func.distinct(ShiftAssignment.employee_id))).filter(
+            ShiftAssignment.shift_id == s.shift_id,
+            ShiftAssignment.start_date <= today,
+            db.or_(ShiftAssignment.end_date == None, ShiftAssignment.end_date >= today)
+        ).scalar()
+
+        output.append({
+            "shift_id": s.shift_id,
+            "shift_name": s.shift_name,
+            "start_time": s.start_time.strftime("%I:%M %p") if s.start_time else None,
+            "end_time": s.end_time.strftime("%I:%M %p") if s.end_time else None,
+            "employee_count": count or 0
+        })
+    
+    return jsonify({
+        "success": True,
+        "shifts": output
+    })
 
 ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR", "MANAGER"]
 
 def has_attendance_permission():
     """Checks if the current user has permission to manage attendance."""
-    if g.user.role in ['SUPER_ADMIN', 'ADMIN']:
+    if g.user.role in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return True
     return g.user.has_permission('MANAGE_ATTENDANCE')
 
@@ -101,6 +136,11 @@ def _upsert_attendance(company_id: int, employee_id: int, att_date: date, payloa
         db.session.add(row)
         is_new = True
 
+    # 0. Update shift_id if provided
+    s_id = payload.get("shift_id")
+    if s_id is not None:
+        row.shift_id = s_id if str(s_id).strip() != "" else None
+
     # 1. Update status if provided
     if payload.get("status"):
         row.status = payload["status"]
@@ -112,14 +152,11 @@ def _upsert_attendance(company_id: int, employee_id: int, att_date: date, payloa
     if row.status == "Absent":
         row.punch_in_time = None
         row.punch_out_time = None
-        row.total_minutes = 0
     else:
         if payload.get("login_at") is not None:
             row.punch_in_time = payload["login_at"]
         if payload.get("logout_at") is not None:
             row.punch_out_time = payload["logout_at"]
-        
-        row.total_minutes = _calc_total_minutes(row.punch_in_time, row.punch_out_time)
 
     row.capture_method = capture_method
 
@@ -246,8 +283,9 @@ def manual_attendance():
 
     employee_id = data.get("employee_id")
     att_date = data.get("date")  # "2025-10-02" or "02/10/2025"
-    status = data.get("status")  # Don't default to "Present" here, let upsert handle it
-    remarks = data.get("remarks", "")
+    status = data.get("status")  # Present, Absent, etc.
+    shift_id = data.get("shift_id")
+    remarks = data.get("remarks") or data.get("reason", "")
 
     if not employee_id or not att_date:
         return jsonify({"message": "employee_id and date are required"}), 400
@@ -291,6 +329,7 @@ def manual_attendance():
 
     payload = {
         "status": status,
+        "shift_id": shift_id,
         "login_at": login_at,
         "logout_at": logout_at,
         "remarks": remarks
@@ -300,6 +339,7 @@ def manual_attendance():
     db.session.commit()
 
     return jsonify({
+        "success": True,
         "message": "Attendance saved successfully",
         "action": "inserted" if is_new else "updated",
         "attendance_id": row.attendance_id,
@@ -661,6 +701,7 @@ def attendance_login():
 
     db.session.add(attendance)
     db.session.commit()
+    log_action("MANUAL_PUNCH_IN", "Attendance", attendance.attendance_id, 201, meta={"employee_id": employee_id, "status": status})
 
     return jsonify({"message": "Login recorded"}), 201
 
@@ -694,6 +735,7 @@ def attendance_logout():
     attendance.punch_out_time = datetime.now()
     attendance.updated_by = g.user.id
     db.session.commit()
+    log_action("MANUAL_PUNCH_OUT", "Attendance", attendance.attendance_id, 200, meta={"employee_id": employee_id})
 
     return jsonify({"message": "Logout recorded"}), 200
 
@@ -845,8 +887,8 @@ def approve_regularization(request_id):
     
     att.capture_method = "Regularization"
     att.updated_by = g.user.id
-    
     db.session.commit()
+    log_action("APPROVE_REGULARIZATION", "AttendanceRegularization", req.id, 200, meta={"employee_id": req.employee_id, "date": str(req.attendance_date)})
     return jsonify({"message": "Request approved and attendance updated", "request_id": req.id, "attendance_action": "updated"}), 200
 
 @attendance_bp.route("/regularization/<int:request_id>/reject", methods=["POST"])
@@ -866,5 +908,282 @@ def reject_regularization(request_id):
     req.approved_by = g.user.id
     req.approver_comment = data.get("approver_comment")
     
+@attendance_bp.route("/bulk-list", methods=["GET"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def bulk_list_attendance_employees():
+    """
+    Returns all employees in the company with their current attendance status 
+    for the provided date. Used by Bulk Attendance dashboard.
+    """
+    if not has_attendance_permission():
+        return jsonify({"message": "Permission denied"}), 403
+
+    att_date_str = request.args.get("date")
+    if not att_date_str:
+        return jsonify({"message": "date parameter is required"}), 400
+
+    try:
+        att_date = _parse_date(att_date_str)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+
+    company_id = g.user.company_id
+    # Super Admin can specify company_id via query param, else uses their own (which might be None)
+    if g.user.role == 'SUPER_ADMIN':
+        company_id = request.args.get("company_id") or company_id
+
+    # 1. Get all active employees for the company
+    emp_query = Employee.query
+    if company_id:
+        emp_query = emp_query.filter_by(company_id=company_id)
+    
+    employees = emp_query.all()
+
+    # 2. Get attendance records for these employees on this date
+    att_records = Attendance.query.filter(
+        Attendance.attendance_date == att_date,
+        Attendance.employee_id.in_([e.id for e in employees]) if employees else False
+    ).all()
+
+    att_map = {r.employee_id: r for r in att_records}
+
+    output = []
+    for emp in employees:
+        att = att_map.get(emp.id)
+        output.append({
+            "employee_id": emp.id,
+            "employee_code": emp.employee_id,
+            "full_name": emp.full_name,
+            "department": emp.department,
+            "current_status": att.status if att else "Not Marked",
+            "reason": att.remarks if att else "",
+            "shift_id": att.shift_id if att else None,
+            "in_time": att.punch_in_time.strftime("%H:%M") if att and att.punch_in_time else None,
+            "out_time": att.punch_out_time.strftime("%H:%M") if att and att.punch_out_time else None
+        })
+
+    return jsonify({
+        "date": att_date.strftime("%Y-%m-%d"),
+        "employees": output
+    }), 200
+
+@attendance_bp.route("/bulk-save", methods=["POST"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def bulk_save_attendance():
+    """
+    Processes a list of attendance updates. 
+    Payload: { "date": "YYYY-MM-DD", "updates": [ { "employee_id": 1, "status": "Present", "remarks": "...", "shift_id": 1 }, ... ] }
+    """
+    if not has_attendance_permission():
+        return jsonify({"message": "Permission denied"}), 403
+
+    data = request.get_json() or {}
+    att_date_str = data.get("date")
+    updates = data.get("updates", [])
+
+    if not att_date_str or not updates:
+        return jsonify({"message": "date and updates list are required"}), 400
+
+    try:
+        att_date = _parse_date(att_date_str)
+    except ValueError as e:
+        return jsonify({"message": str(e)}), 400
+
+    results = {"success": [], "errors": []}
+
+    for up in updates:
+        emp_id = up.get("employee_id")
+        if not emp_id:
+            results["errors"].append({"reason": "Missing employee_id in update item"})
+            continue
+
+        emp = Employee.query.get(emp_id)
+        if not emp:
+            results["errors"].append({"employee_id": emp_id, "reason": "Employee not found"})
+            continue
+        
+        # Verify company permission
+        if g.user.role != 'SUPER_ADMIN' and emp.company_id != g.user.company_id:
+            results["errors"].append({"employee_id": emp_id, "reason": "Unauthorized for this employee"})
+            continue
+
+        # Prepare payload for _upsert_attendance
+        payload = {
+            "status": up.get("status"),
+            "remarks": up.get("remarks") or up.get("reason"),
+            "shift_id": up.get("shift_id")
+        }
+        
+        # Handle times if provided
+        if up.get("in_time"):
+            payload["login_at"] = _parse_time(up["in_time"], att_date)
+        if up.get("out_time"):
+            payload["logout_at"] = _parse_time(up["out_time"], att_date)
+
+        try:
+            row, is_new = _upsert_attendance(emp.company_id, emp.id, att_date, payload, capture_method="Bulk")
+            results["success"].append({
+                "employee_id": emp.id,
+                "attendance_id": row.attendance_id,
+                "action": "inserted" if is_new else "updated"
+            })
+        except Exception as e:
+            results["errors"].append({"employee_id": emp.id, "reason": str(e)})
+
     db.session.commit()
-    return jsonify({"message": "Request rejected", "request_id": req.id, "status": "REJECTED"}), 200
+    log_action("BULK_SAVE_ATTENDANCE", "Attendance", None, 200, meta={"date": att_date_str, "success_count": len(results["success"]), "error_count": len(results["errors"])})
+    return jsonify({
+        "message": "Bulk update completed",
+        "processed_date": att_date.strftime("%Y-%m-%d"),
+        "results": results
+    }), 200
+
+@attendance_bp.route("/employee-details/<employee_id>", methods=["GET"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def get_employee_attendance_details(employee_id):
+    """
+    Fetches employee full name and current assigned shift for auto-population in UI.
+    """
+    if not has_attendance_permission():
+        return jsonify({"message": "Permission denied"}), 403
+
+    # Try by Employee Code (string)
+    query = Employee.query.filter_by(employee_id=str(employee_id))
+    if g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+    emp = query.first()
+
+    # If not found, try by Primary Key (ID)
+    if not emp and str(employee_id).isdigit():
+        emp = Employee.query.filter_by(id=int(employee_id)).first()
+        if emp and g.user.role != 'SUPER_ADMIN' and emp.company_id != g.user.company_id:
+            emp = None
+
+    if not emp:
+        return jsonify({"message": "Employee not found"}), 404
+
+    # Get current shift assignment
+    today = date.today()
+    assignment = ShiftAssignment.query.filter(
+        ShiftAssignment.employee_id == emp.id,
+        ShiftAssignment.start_date <= today,
+        (ShiftAssignment.end_date == None) | (ShiftAssignment.end_date >= today)
+    ).first()
+
+    shift_data = None
+    if assignment and assignment.shift:
+        shift_data = {
+            "shift_id": assignment.shift.shift_id,
+            "shift_name": assignment.shift.shift_name,
+            "start_time": assignment.shift.start_time.strftime("%H:%M") if assignment.shift.start_time else None,
+            "end_time": assignment.shift.end_time.strftime("%H:%M") if assignment.shift.end_time else None
+        }
+
+    return jsonify({
+        "employee_id": emp.id,
+        "employee_code": emp.employee_id,
+        "full_name": emp.full_name,
+        "current_shift": shift_data
+    }), 200
+
+@attendance_bp.route("/dashboard-stats", methods=["GET"])
+@token_required
+@role_required(ALLOWED_MANAGE_ROLES)
+def dashboard_stats():
+    """
+    Returns real-time dashboard data for management roles.
+    """
+    if not has_attendance_permission():
+        return jsonify({"message": "Permission denied"}), 403
+
+    today = date.today()
+    company_id = g.user.company_id
+    if g.user.role == 'SUPER_ADMIN':
+        company_id = request.args.get("company_id") or company_id
+
+    # 1. Summary Counts
+    att_query = Attendance.query.filter_by(attendance_date=today)
+    if company_id:
+        att_query = att_query.filter_by(company_id=company_id)
+    
+    att_today = att_query.all()
+    
+    summary = {
+        "Present": 0,
+        "Absent": 0,
+        "Half Day": 0,
+        "Late": 0,
+        "WFH": 0
+    }
+    for r in att_today:
+        if r.status in summary:
+            summary[r.status] += 1
+
+    # 2. Shift-wise Distribution
+    shift_counts = {}
+    for r in att_today:
+        if r.status == "Present":
+            s_name = "General Shift"
+            if r.shift_id:
+                s_obj = Shift.query.get(r.shift_id)
+                if s_obj: s_name = s_obj.shift_name
+            shift_counts[s_name] = shift_counts.get(s_name, 0) + 1
+    
+    shift_dist = {
+        "labels": list(shift_counts.keys()),
+        "data": list(shift_counts.values())
+    }
+
+    # 3. Weekly Trend (Last 7 Days)
+    week_ago = today - timedelta(days=6)
+    trend_records = Attendance.query.filter(
+        Attendance.attendance_date >= week_ago,
+        Attendance.attendance_date <= today
+    )
+    if company_id:
+        trend_records = trend_records.filter_by(company_id=company_id)
+    
+    trend_data = trend_records.all()
+    
+    days = []
+    present_counts = []
+    absent_counts = []
+    
+    for i in range(7):
+        d = week_ago + timedelta(days=i)
+        days.append(d.strftime("%a"))
+        present_counts.append(len([r for r in trend_data if r.attendance_date == d and r.status == "Present"]))
+        absent_counts.append(len([r for r in trend_data if r.attendance_date == d and r.status == "Absent"]))
+
+    # 4. Today's Overview (All)
+    overview = []
+    for r in att_today:
+        emp = Employee.query.get(r.employee_id)
+        s_name = "General Shift"
+        if r.shift_id:
+            s_obj = Shift.query.get(r.shift_id)
+            if s_obj: s_name = s_obj.shift_name
+            
+        overview.append({
+            "name": emp.full_name if emp else "Unknown",
+            "emp_code": emp.employee_id if emp else "??",
+            "status": r.status,
+            "badge": "success" if r.status == "Present" else "danger" if r.status == "Absent" else "warning",
+            "shift": s_name,
+            "in": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else "-",
+            "out": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else "-"
+        })
+
+    return jsonify({
+        "summary": summary,
+        "shift_dist": shift_dist,
+        "trend": {
+            "labels": days,
+            "present": present_counts,
+            "absent": absent_counts
+        },
+        "overview": overview
+    }), 200

@@ -11,6 +11,7 @@ from models.employee import Employee
 from models.company import Company
 from utils.email_utils import send_account_created_alert, send_login_credentials, send_signup_otp, send_password_reset_otp
 from utils.url_generator import build_company_base_url
+from utils.audit_logger import log_action
 
 from utils.decorators import token_required
 
@@ -265,6 +266,10 @@ def login():
         'company_id': user.company_id,
         'exp': datetime.utcnow() + timedelta(hours=24)
     }, Config.SECRET_KEY, algorithm="HS256")
+
+    # Audit Log
+    g.user = user
+    log_action("LOGIN", "User", user.id, 200)
 
     user_data = {
         'id': user.id,

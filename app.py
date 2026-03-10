@@ -35,6 +35,7 @@ from routes.approvals import approvals_bp
 from routes.company import company_bp
 from routes.hr_documents import hr_docs_bp
 from routes.profile_routes import profile_bp
+from routes.audit_log import audit_bp
 
 from models.user_permission import UserPermission
 from models.department import Department
@@ -93,6 +94,7 @@ app.register_blueprint(approvals_bp, url_prefix="/api/approvals")
 app.register_blueprint(company_bp, url_prefix="/api/superadmin") # Corrected registration and prefix
 app.register_blueprint(hr_docs_bp, url_prefix="/api/hr-docs")
 app.register_blueprint(profile_bp)
+app.register_blueprint(audit_bp)
 
 if __name__ == "__main__":
     with app.app_context():

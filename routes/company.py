@@ -474,7 +474,7 @@ def create_branch():
 
 @company_bp.route("/branches", methods=["GET"])
 @token_required
-@role_required(["SUPER_ADMIN", "ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def list_branches():
     # 1. Auto-Sync: Ensure every company has at least one explicit branch record
     # This fulfills the requirement that "every company should be stored as a branch too".
@@ -497,7 +497,7 @@ def list_branches():
 
     # 2. Query: Use a join to get the full list of branches with company names
     query = db.session.query(Branch, Company).join(Company, Branch.company_id == Company.id)
-    if g.user.role == 'ADMIN':
+    if g.user.role in ['ADMIN', 'HR']:
         query = query.filter(Branch.company_id == g.user.company_id)
     
     results = query.order_by(Branch.id.desc()).all()
@@ -677,12 +677,12 @@ def get_branch_map():
 # ----------------------------
 @company_bp.route("/companies", methods=["GET"])
 @token_required
-@role_required(["SUPER_ADMIN", "ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def list_companies():
     # Debug: Check if the frontend is sending the token for the list request
     print("AUTH HEADER (list_companies):", request.headers.get("Authorization"))
 
-    if g.user.role == 'ADMIN':
+    if g.user.role in ['ADMIN', 'HR']:
         companies = Company.query.filter_by(id=g.user.company_id).all()
     else:
         companies = Company.query.order_by(Company.id.desc()).all()
