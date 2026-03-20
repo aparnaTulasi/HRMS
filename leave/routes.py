@@ -109,9 +109,15 @@ def health_check():
 
 @leave_bp.route('/seed/defaults', methods=['POST'])
 @token_required
-@role_required(['ADMIN'])
+@role_required(['ADMIN', 'HR'])
 def seed_defaults():
-    company_id = g.user.company_id
+    # Support Super Admin seeding for specific company
+    company_id = request.args.get('company_id', type=int)
+    if not company_id:
+        company_id = g.user.company_id
+        
+    if not company_id:
+        return jsonify({'message': 'company_id is required for seeding'}), 400
     
     # 1. Create Default Leave Types if none exist
     if not LeaveType.query.filter_by(company_id=company_id).first():

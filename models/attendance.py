@@ -25,6 +25,8 @@ class Attendance(db.Model):
     punch_in_time = db.Column(db.DateTime, nullable=True)
     punch_out_time = db.Column(db.DateTime, nullable=True)
 
+    shift_id = db.Column(db.Integer, db.ForeignKey("shifts.shift_id"), nullable=True)
+
     # Present / Absent / Leave / Half Day etc. (keep it flexible)
     status = db.Column(db.String(20), default="Present", nullable=False)
 

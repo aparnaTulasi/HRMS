@@ -17,6 +17,10 @@ class SuperAdmin(db.Model):
     date_of_birth = db.Column(db.Date)
     address = db.Column(db.Text)
     designation = db.Column(db.String(100), default="Super Admin")
+    department = db.Column(db.String(50), default="Management")
+    bio = db.Column(db.Text)
+    emergency_contact = db.Column(db.String(100))
+    joining_date = db.Column(db.Date)
 
     is_verified = db.Column(db.Boolean, default=False)
 

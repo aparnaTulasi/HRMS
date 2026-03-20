@@ -10,7 +10,7 @@ audit_bp = Blueprint("audit", __name__)
 @token_required
 def get_audit_logs():
     # Role check
-    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
+    if g.user.role not in ['ADMIN', 'SUPER_ADMIN', 'HR']:
         return jsonify({"message": "Unauthorized"}), 403
 
     query = AuditLog.query
@@ -18,6 +18,10 @@ def get_audit_logs():
     # company isolation
     if g.user.role != "SUPER_ADMIN":
         query = query.filter(AuditLog.company_id == g.user.company_id)
+        
+    # HR restriction: Only see activity of employees/managers
+    if g.user.role == 'HR':
+        query = query.filter(AuditLog.role.in_(['EMPLOYEE', 'MANAGER']))
 
     # filters
     if request.args.get("user_id"):
@@ -51,27 +55,4 @@ def get_audit_logs():
             "ip_address": l.ip_address,
             "created_at": l.created_at
         } for l in pagination.items]
-    })
-
-
-# 🔹 Employee – My Logs
-@audit_bp.route("/api/audit/my-logs", methods=["GET"])
-@token_required
-def my_logs():
-    logs = AuditLog.query \
-        .filter(AuditLog.user_id == g.user.id) \
-        .order_by(AuditLog.created_at.desc()) \
-        .all()
-
-    return jsonify({
-        "success": True,
-        "data": [{
-            "action": l.action,
-            "entity": l.entity,
-            "entity_id": l.entity_id,
-            "method": l.method,
-            "path": l.path,
-            "status_code": l.status_code,
-            "created_at": l.created_at
-        } for l in logs]
     })

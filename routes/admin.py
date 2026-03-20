@@ -16,6 +16,7 @@ from models.department import Department
 from models.designation import Designation
 from models.branch import Branch
 from models.payroll import PayGrade
+from utils.audit_logger import log_action
 
 admin_bp = Blueprint('admin', __name__)
 @admin_bp.route('/employees', methods=['GET'])
@@ -109,6 +110,7 @@ def delete_employee(emp_id):
                 db.session.delete(user)
 
         db.session.commit()
+        log_action("DELETE_EMPLOYEE", "Employee", emp_id, 200, meta={"name": emp_name})
         return jsonify({'success': True, 'message': f'Employee "{emp_name}" permanently deleted.'}), 200
 
     except Exception as e:
@@ -139,6 +141,7 @@ def update_employee(emp_id):
         emp.user.status = data['status']
     
     db.session.commit()
+    log_action("UPDATE_EMPLOYEE", "Employee", emp_id, 200, meta=data)
     return jsonify({'success': True, 'message': 'Employee updated successfully'})
 
 def _set_if_exists(obj, field, value):
@@ -166,7 +169,7 @@ def generate_employee_id(company_code: str) -> str:
 
 @admin_bp.route('/dropdown-data', methods=['GET'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN'])
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
 def get_dropdown_data():
     company_id = g.user.company_id
     
@@ -233,7 +236,7 @@ def _resolve_branch_id(data, company_id):
 @admin_bp.route('/create-employee', methods=['POST'])
 @admin_bp.route('/create-hr', methods=['POST'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN'])
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
 def create_employee():
     try:
         return _create_employee_impl()
@@ -415,6 +418,8 @@ def _create_employee_impl():
     except Exception as email_err:
         # Log but don't fail - employee is already saved
         print(f"[WARNING] Email notification failed: {email_err}")
+
+    log_action("CREATE_EMPLOYEE", "Employee", new_employee.id, 201, meta={"name": full_name, "role": role})
 
     return jsonify({
         'success': True,

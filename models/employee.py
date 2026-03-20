@@ -21,6 +21,8 @@ class Employee(db.Model):
     pay_grade = db.Column(db.String(50))
     branch_id = db.Column(db.Integer, db.ForeignKey('branches.id'), nullable=True)
     ctc = db.Column(db.Float, default=0.0)
+    bio = db.Column(db.Text)
+    emergency_contact = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
