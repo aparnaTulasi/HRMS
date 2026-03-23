@@ -14,6 +14,7 @@ from models.payroll import (
 from models.employee import Employee
 from models.company import Company
 from models.attendance import Attendance
+from models.employee_statutory import Form16, FullAndFinal
 import calendar
 
 payroll_bp = Blueprint("payroll_bp", __name__)
@@ -1225,3 +1226,173 @@ def list_components_dropdown():
     rows = SalaryComponent.query.filter_by(company_id=cid, status="ACTIVE").all()
     data = [{"id": r.id, "name": r.name, "type": r.type} for r in rows]
     return jsonify({"success": True, "data": data}), 200
+
+# =========================================================
+# FORM-16 / TAX CERTIFICATES
+# =========================================================
+
+@payroll_bp.route("/payroll/form16", methods=["GET"])
+@token_required
+def get_form16():
+    emp_id = request.args.get("employee_id")
+    fy = request.args.get("fy")
+    cid = _company_id()
+    
+    if not emp_id or not fy:
+        # If no specific params, return all available for the company (optional)
+        records = Form16.query.filter_by(company_id=cid).all()
+        return jsonify({"success": True, "data": [r.to_dict() for r in records]}), 200
+        
+    record = Form16.query.filter_by(employee_id=emp_id, fy=fy, company_id=cid).first()
+    if not record:
+        return jsonify({"success": False, "message": "Form-16 not found"}), 404
+        
+    return jsonify({"success": True, "data": record.to_dict()}), 200
+
+@payroll_bp.route("/payroll/form16", methods=["POST"])
+@token_required
+def save_form16():
+    data = request.get_json(silent=True) or {}
+    cid = _company_id()
+    
+    emp_id = data.get("employee_id")
+    fy = data.get("fy")
+    
+    if not emp_id or not fy:
+        return jsonify({"success": False, "message": "employee_id and fy are required"}), 400
+        
+    record = Form16.query.filter_by(employee_id=emp_id, fy=fy, company_id=cid).first()
+    if not record:
+        record = Form16(employee_id=emp_id, fy=fy, company_id=cid)
+        db.session.add(record)
+        
+    record.ay = data.get("ay", record.ay or "")
+    record.pan = data.get("pan", record.pan or "")
+    record.tan = data.get("tan", record.tan or "")
+    record.employer_pan = data.get("employer_pan", record.employer_pan or "")
+    record.part_a = data.get("partA", record.part_a or {})
+    record.part_b = data.get("partB", record.part_b or {})
+    
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+        
+    return jsonify({"success": True, "message": "Form-16 saved successfully", "data": record.to_dict()}), 200
+    
+# =========================================================
+# FULL & FINAL SETTLEMENT (F&F)
+# =========================================================
+
+@payroll_bp.route("/payroll/fnf", methods=["GET"])
+@token_required
+def get_fnf():
+    cid = _company_id()
+    emp_id = request.args.get("employee_id")
+    
+    if emp_id:
+        record = FullAndFinal.query.filter_by(employee_id=emp_id, company_id=cid).first()
+        if not record:
+            return jsonify({"success": False, "message": "F&F record not found"}), 404
+        return jsonify({"success": True, "data": record.to_dict()}), 200
+    
+    # Otherwise return all for the company
+    records = FullAndFinal.query.filter_by(company_id=cid).all()
+    return jsonify({"success": True, "data": [r.to_dict() for r in records]}), 200
+
+@payroll_bp.route("/payroll/fnf", methods=["POST"])
+@token_required
+def save_fnf():
+    data = request.get_json(silent=True) or {}
+    cid = _company_id()
+    emp_id = data.get("employee_id")
+    
+    if not emp_id:
+        return jsonify({"success": False, "message": "employee_id is required"}), 400
+        
+    record = FullAndFinal.query.filter_by(employee_id=emp_id, company_id=cid).first()
+    if not record:
+        record = FullAndFinal(employee_id=emp_id, company_id=cid)
+        db.session.add(record)
+        
+    # Update fields
+    if "resignDate" in data and data["resignDate"]:
+        try:
+            record.resign_date = datetime.strptime(data["resignDate"], '%d %b %Y').date()
+        except:
+             record.resign_date = datetime.strptime(data["resignDate"], '%Y-%m-%d').date()
+             
+    if "lastWorkingDay" in data and data["lastWorkingDay"]:
+        try:
+            record.last_working_day = datetime.strptime(data["lastWorkingDay"], '%d %b %Y').date()
+        except:
+            record.last_working_day = datetime.strptime(data["lastWorkingDay"], '%Y-%m-%d').date()
+        
+    record.notice_period_required = data.get("noticePeriodRequired", record.notice_period_required)
+    record.notice_period_served = data.get("noticePeriodServed", record.notice_period_served)
+    record.notice_status = data.get("noticeStatus", record.notice_status)
+    record.status = data.get("status", record.status)
+    record.settlement_data = data.get("settlement", record.settlement_data)
+    record.exit_clearance = data.get("clearance", record.exit_clearance)
+    
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+        
+    return jsonify({"success": True, "message": "F&F record saved successfully", "data": record.to_dict()}), 200
+@payroll_bp.get("/payroll/reports/salary-register")
+@token_required
+@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+def get_salary_register():
+    cid = _company_id()
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+
+    if not month or not year:
+        now = datetime.utcnow()
+        month = month or now.month
+        year = year or now.year
+
+    # Fetch all active payslips for the given period and company
+    payslips = PaySlip.query.filter_by(
+        company_id=cid, 
+        pay_month=month, 
+        pay_year=year,
+        is_deleted=False
+    ).all()
+
+    report_data = []
+    for ps in payslips:
+        employee = Employee.query.get(ps.employee_id)
+        if not employee:
+            continue
+            
+        earnings = ps.earnings_dict
+        basic = earnings.get("Basic") or earnings.get("BASIC") or 0.0
+        hra = earnings.get("HRA") or earnings.get("House Rent Allowance") or 0.0
+        
+        # Calculate other allowances (Gross - Basic - HRA)
+        # Note: Allowances in the UI seems to be a catch-all for other earnings
+        other_allowances = ps.gross_salary - basic - hra
+        
+        report_data.append({
+            "eid": employee.employee_id,
+            "name": employee.full_name,
+            "dept": employee.department or "N/A",
+            "basic": f"₹{basic:,.0f}",
+            "hra": f"₹{hra:,.0f}",
+            "allow": f"₹{other_allowances:,.0f}",
+            "gross": f"₹{ps.gross_salary:,.0f}",
+            "ded": f"₹{ps.total_deductions:,.0f}",
+            "net": f"₹{ps.net_salary:,.0f}"
+        })
+
+    return jsonify({
+        "success": True, 
+        "data": report_data,
+        "count": len(report_data),
+        "period": f"{calendar.month_name[month]} {year}"
+    }), 200

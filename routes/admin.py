@@ -49,6 +49,7 @@ def get_employees():
             'company_id': emp.company_id,
             'phone': emp.phone_number or '',
             'status': user.status.capitalize() if user and user.status else 'Active',
+            'joining_date': emp.date_of_joining.isoformat() if emp.date_of_joining else None,
         })
     return jsonify({'success': True, 'data': result})
 

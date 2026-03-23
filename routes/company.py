@@ -235,6 +235,11 @@ def create_company():
         else:
             company_prefix = company_name[:3].upper()
 
+    # If company_code is missing, try to auto-generate it (e.g. GOO123)
+    if not company_code and company_prefix:
+        import random
+        company_code = f"{company_prefix}{random.randint(100, 999)}"
+
     industry = (data.get("industry") or "").strip()
     company_size = (data.get("company_size") or "").strip()
     country = (data.get("country") or "").strip()

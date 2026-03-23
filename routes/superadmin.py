@@ -4,7 +4,7 @@ import jwt
 from config import Config
 import secrets
 import string
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
@@ -13,6 +13,9 @@ from models.company import Company
 from models.user import User
 from models.employee import Employee
 from models.department import Department
+from models.branch import Branch
+from models.attendance import Attendance
+from leave.models import LeaveRequest
 from utils.decorators import token_required, role_required
 from utils.email_utils import send_login_credentials, send_account_created_alert
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
@@ -461,7 +464,111 @@ def _create_user_for_company(company_id: int, u: dict):
 
 
 # ======================================================
-# ✅ 5) DELETE EMPLOYEE (Soft Delete by default)
+# ✅ 5) DASHBOARD STATS
+# GET /api/superadmin/dashboard-stats
+# ======================================================
+@superadmin_bp.route("/dashboard-stats", methods=["GET"])
+@token_required
+@role_required(["SUPER_ADMIN"])
+def get_dashboard_stats():
+    try:
+        total_companies = Company.query.count()
+        total_branches = Branch.query.count()
+        total_admins = User.query.filter_by(role="ADMIN").count()
+        total_hrs = User.query.filter_by(role="HR").count()
+        total_managers = User.query.filter_by(role="MANAGER").count()
+        total_employees = Employee.query.count()
+
+        # Department distribution
+        departments = db.session.query(
+            Employee.department, func.count(Employee.id)
+        ).group_by(Employee.department).all()
+
+        colors = ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16']
+        dept_data = []
+        for i, (dept_name, count) in enumerate(departments):
+            if dept_name:
+                dept_data.append({
+                    "label": dept_name,
+                    "value": count,
+                    "color": colors[i % len(colors)]
+                })
+
+        # Attendance summary (for today)
+        today = date.today()
+        attendance_counts = db.session.query(
+            Attendance.status, func.count(Attendance.attendance_id)
+        ).filter(Attendance.attendance_date == today).group_by(Attendance.status).all()
+        
+        att_dict = {status: count for status, count in attendance_counts}
+        # If total_employees > sum of logged states, maybe calculate 'Not Marked' 
+        # but the prompt wants to map the existing 5 UI elements
+        attendance_summary = [
+            {"label": "Present", "value": att_dict.get("Present", 0), "color": "#10b981"},
+            {"label": "Absent", "value": att_dict.get("Absent", 0), "color": "#ef4444"},
+            {"label": "WFH", "value": att_dict.get("WFH", 0), "color": "#3b82f6"},
+            {"label": "Leave", "value": att_dict.get("Leave", 0) + att_dict.get("Half Day", 0), "color": "#f59e0b"},
+            {"label": "WeekOff", "value": att_dict.get("WeekOff", 0), "color": "#6b7280"}
+        ]
+
+        # Growth trend (Employee joins per month for the current year)
+        current_year = today.year
+        employees = db.session.query(Employee.date_of_joining).filter(
+            func.extract('year', Employee.date_of_joining) == current_year
+        ).all()
+        
+        monthly_counts = [0] * 12
+        for emp in employees:
+            if emp.date_of_joining:
+                monthly_counts[emp.date_of_joining.month - 1] += 1
+                
+        # Calculate cumulative growth for the year
+        revenue_trend = []
+        cumulative = 0
+        for count in monthly_counts:
+            cumulative += count
+            revenue_trend.append(cumulative)
+
+        # Pending Requests (from LeaveRequest)
+        pending_leaves = LeaveRequest.query.filter(
+            LeaveRequest.status.in_(['Pending', 'Pending Approval'])
+        ).order_by(LeaveRequest.created_at.desc()).limit(5).all()
+
+        pending_requests = []
+        req_colors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#3b82f6']
+        for i, req in enumerate(pending_leaves):
+            emp_name = req.employee.full_name if req.employee and req.employee.full_name else "Unknown"
+            initials = "".join([n[0] for n in emp_name.split() if n])[:2].upper() if emp_name else "U"
+            pending_requests.append({
+                "id": req.id,
+                "name": emp_name,
+                "initials": initials,
+                "type": "Leave",
+                "color": req_colors[i % len(req_colors)]
+            })
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "stats": {
+                    "total_companies": total_companies,
+                    "total_branches": total_branches,
+                    "total_admins": total_admins,
+                    "total_hrs": total_hrs,
+                    "total_managers": total_managers,
+                    "total_employees": total_employees
+                },
+                "departmentData": dept_data,
+                "attendanceSummary": attendance_summary,
+                "revenueTrend": revenue_trend,
+                "pendingRequests": pending_requests
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"success": False, "message": "Failed to fetch dashboard stats", "error": str(e)}), 500
+
+# ======================================================
+# ✅ 6) DELETE EMPLOYEE (Soft Delete by default)
 # DELETE /api/superadmin/employees/<employee_id>
 # ======================================================
 @superadmin_bp.route("/employees/<employee_id>", methods=["DELETE"])

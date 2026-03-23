@@ -10,6 +10,9 @@ if not exist "venv\Scripts\activate" (
 )
 echo Activating virtual environment...
 call venv\Scripts\activate
+echo Setting UTF-8 encoding for Python console...
+chcp 65001
+set PYTHONIOENCODING=utf-8
 echo Starting Flask App...
 python app.py
 pause

@@ -36,20 +36,23 @@ from routes.company import company_bp
 from routes.hr_documents import hr_docs_bp
 from routes.profile_routes import profile_bp
 from routes.audit_log import audit_bp
+from routes.support import support_bp
+from routes.calendar import calendar_bp
 
 from models.user_permission import UserPermission
 from models.department import Department
 from models.designation import Designation
 from models.bank_details import BankDetails
 from models.branch import Branch
+from models.employee_statutory import Form16, FullAndFinal
 
 app = Flask(__name__)
 app.config.from_object(Config)
 
 @app.before_request
 def log_request_info():
-    app.logger.info(f"📡 Incoming Request: {request.method} {request.url} | Origin: {request.headers.get('Origin')}")
-    print(f"📡 HIT: {request.method} {request.url}", flush=True)
+    app.logger.info(f"[API] Incoming Request: {request.method} {request.url} | Origin: {request.headers.get('Origin')}")
+    print(f"[API] HIT: {request.method} {request.url}", flush=True)
 
 app.config["SECRET_KEY"] = Config.SECRET_KEY
 app.config["SESSION_PERMANENT"] = False
@@ -62,11 +65,13 @@ CORS(
         "origins": [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
+            "http://192.168.0.4:5173",
             "http://192.168.1.15:5173",
             "http://192.168.0.110:5173",
             "http://192.168.1.33:5173",
             "http://192.168.56.1:5173",
             re.compile(r"^http://192\.168\..*:\d+$"),
+            re.compile(r"^http://100\..*:\d+$"),
             re.compile(r"^http://localhost:\d+$"),
             re.compile(r"^http://127\.0\.0\.1:\d+$")
         ]
@@ -95,6 +100,8 @@ app.register_blueprint(company_bp, url_prefix="/api/superadmin") # Corrected reg
 app.register_blueprint(hr_docs_bp, url_prefix="/api/hr-docs")
 app.register_blueprint(profile_bp)
 app.register_blueprint(audit_bp)
+app.register_blueprint(support_bp, url_prefix="/api/support")
+app.register_blueprint(calendar_bp, url_prefix="/api/calendar")
 
 if __name__ == "__main__":
     with app.app_context():

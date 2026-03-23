@@ -16,6 +16,9 @@ class LeaveType(db.Model):
     is_paid = db.Column(db.Boolean, default=True)
     is_active = db.Column(db.Boolean, default=True)
 
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
     __table_args__ = (db.UniqueConstraint('company_id', 'code', name='uq_leave_type_company_code'),)
 
 

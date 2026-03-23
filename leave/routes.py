@@ -7,6 +7,7 @@ from .services import select_policy_mapping, compute_entitlement, add_ledger, en
 from .audit_logger import log_action
 from models import db
 from models.employee import Employee
+from models.user import User
 from models.audit_log import AuditLog
 from utils.decorators import token_required, role_required
 
@@ -396,6 +397,158 @@ def remove_mapping(mapping_id):
     db.session.delete(mapping)
     db.session.commit()
     return jsonify({'message': 'Mapping removed successfully'}), 200
+
+# ==============================================================================
+# UI-Facing Unified Policies (LeaveType + Mapping)
+# ==============================================================================
+
+@leave_bp.route('/ui-policies', methods=['GET'])
+@token_required
+def get_ui_policies():
+    company_id = g.user.company_id or request.args.get('company_id') or 1
+    # Get active default policy for company
+    policy = LeavePolicy.query.filter_by(company_id=company_id, is_active=True).first()
+    if not policy:
+        return jsonify([])
+    
+    # Get mappings
+    mappings = LeavePolicyMapping.query.filter_by(policy_id=policy.id).all()
+    results = []
+    for m in mappings:
+        lt = LeaveType.query.filter_by(id=m.leave_type_id, is_active=True).first()
+        if lt:
+            created_by_name = 'System'
+            if getattr(lt, 'created_by', None):
+                user = db.session.query(User).get(lt.created_by)
+                if user:
+                    created_by_name = getattr(user, 'username', getattr(user, 'email', 'Admin'))
+            
+            results.append({
+                'id': lt.id,
+                'name': lt.name,
+                'days': m.annual_allocation,
+                'carryForward': (m.carry_forward_limit or 0) > 0,
+                'maxCarryForward': m.carry_forward_limit or 0,
+                'description': f"{lt.name} Policy Settings",
+                'createdAt': lt.created_at.isoformat() if hasattr(lt, 'created_at') and lt.created_at else None,
+                'createdBy': created_by_name
+            })
+    return jsonify(results), 200
+
+@leave_bp.route('/ui-policies', methods=['POST'])
+@token_required
+@role_required(['ADMIN', 'HR'])
+def create_ui_policy():
+    data = request.get_json()
+    company_id = g.user.company_id or data.get('company_id') or 1
+    
+    # Needs a default policy
+    policy = LeavePolicy.query.filter_by(company_id=company_id, is_active=True).first()
+    if not policy:
+        # Auto-create if not exists
+        policy = LeavePolicy(
+            company_id=company_id,
+            name="Standard Policy",
+            effective_from=datetime.utcnow().date(),
+            config_json="{}"
+        )
+        db.session.add(policy)
+        db.session.flush()
+
+    name = data.get('name')
+    if not name:
+        return jsonify({'message': 'Policy Name is required'}), 400
+        
+    code = "".join([c for c in name if c.isupper()] or name[:3]).upper()
+    # Ensure code is unique
+    base_code = code
+    counter = 1
+    while LeaveType.query.filter_by(company_id=company_id, code=code).first():
+        code = f"{base_code}{counter}"
+        counter += 1
+
+    # 1. Create LeaveType
+    new_type = LeaveType(
+        company_id=company_id,
+        code=code,
+        name=name,
+        unit='DAY',
+        is_paid=True,
+        created_at=datetime.utcnow(),
+        created_by=g.user.id
+    )
+    db.session.add(new_type)
+    db.session.flush() # get ID
+    
+    # 2. Map LeaveType to Policy
+    days = data.get('days', 0)
+    carry_forward = data.get('carryForward', False)
+    max_cf = data.get('maxCarryForward', 0) if carry_forward else 0
+    
+    new_mapping = LeavePolicyMapping(
+        company_id=company_id,
+        policy_id=policy.id,
+        leave_type_id=new_type.id,
+        annual_allocation=days,
+        carry_forward_limit=max_cf,
+        unit='DAY'
+    )
+    db.session.add(new_mapping)
+    db.session.commit()
+    
+    return jsonify({
+        'id': new_type.id,
+        'name': new_type.name,
+        'days': new_mapping.annual_allocation,
+        'carryForward': (new_mapping.carry_forward_limit or 0) > 0,
+        'maxCarryForward': new_mapping.carry_forward_limit or 0,
+        'description': f"{new_type.name} Policy Settings",
+        'createdAt': new_type.created_at.isoformat() if hasattr(new_type, 'created_at') and new_type.created_at else None,
+        'createdBy': 'You'
+    }), 201
+
+@leave_bp.route('/ui-policies/<int:id>', methods=['PUT'])
+@token_required
+@role_required(['ADMIN', 'HR'])
+def update_ui_policy(id):
+    company_id = g.user.company_id
+    data = request.get_json()
+    
+    # Update LeaveType
+    lt = LeaveType.query.filter_by(id=id, company_id=company_id).first_or_404()
+    if 'name' in data:
+        lt.name = data['name']
+        
+    # Update Mapping
+    policy = LeavePolicy.query.filter_by(company_id=company_id, is_active=True).first()
+    if policy:
+        mapping = LeavePolicyMapping.query.filter_by(policy_id=policy.id, leave_type_id=lt.id).first()
+        if mapping:
+            if 'days' in data:
+                mapping.annual_allocation = data['days']
+            if 'carryForward' in data or 'maxCarryForward' in data:
+                cf = data.get('carryForward', (mapping.carry_forward_limit or 0) > 0)
+                mapping.carry_forward_limit = data.get('maxCarryForward', mapping.carry_forward_limit) if cf else 0
+    db.session.commit()
+    
+    return jsonify({'message': 'Updated successfully'}), 200
+
+@leave_bp.route('/ui-policies/<int:id>', methods=['DELETE'])
+@token_required
+@role_required(['ADMIN', 'HR'])
+def delete_ui_policy(id):
+    company_id = g.user.company_id
+    lt = LeaveType.query.filter_by(id=id, company_id=company_id).first_or_404()
+    lt.is_active = False
+    
+    policy = LeavePolicy.query.filter_by(company_id=company_id, is_active=True).first()
+    if policy:
+        mapping = LeavePolicyMapping.query.filter_by(policy_id=policy.id, leave_type_id=lt.id).first()
+        if mapping:
+            db.session.delete(mapping)
+    
+    db.session.commit()
+    return jsonify({'message': 'Deleted successfully'}), 200
 
 # ==============================================================================
 # D) Holiday Calendars & Holidays
@@ -1164,15 +1317,17 @@ def get_pending_approvals():
             status='Pending'
         )
 
-    # Join with LeaveType to get the name for display
-    leaves_with_type = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
-        .add_columns(LeaveType.name.label("leave_type_name"))\
+    # Join with LeaveType and Employee to get the names for display
+    leaves_with_data = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
+        .join(Employee, LeaveRequest.employee_id == Employee.id)\
+        .add_columns(LeaveType.name.label("leave_type_name"), Employee.first_name, Employee.last_name)\
         .order_by(LeaveRequest.from_date.asc()).all()
     
     results = []
-    for leave_req, leave_type_name in leaves_with_type:
+    for leave_req, leave_type_name, first_name, last_name in leaves_with_data:
         data = serialize(leave_req)
         data['leave_type_name'] = leave_type_name
+        data['employee_name'] = f"{first_name} {last_name}"
         results.append(data)
 
     return jsonify(results), 200
