@@ -1,7 +1,7 @@
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from flask import current_app
+# from flask import current_app (Moved inside function)
 from datetime import datetime
 
 
@@ -9,6 +9,7 @@ def _send_plain_email(to_email: str, subject: str, body: str) -> bool:
     """
     Internal helper: sends email using SMTP config from Flask current_app.config
     """
+    from flask import current_app
     smtp_server = current_app.config.get("MAIL_SERVER", "smtp.gmail.com")
     smtp_port = int(current_app.config.get("MAIL_PORT", 587))
     smtp_user = current_app.config.get("MAIL_USERNAME")
@@ -45,13 +46,33 @@ def _send_plain_email(to_email: str, subject: str, body: str) -> bool:
 # -------------------------
 def send_signup_otp(to_email: str, otp: str) -> bool:
     subject = "Super Admin Signup OTP"
-    body = f"Your signup OTP is: {otp}\n\nValid for 10 minutes."
+    body = (
+        "Dear User,\n\n"
+        "We received a request to create a Super Admin account for your HRMS.\n\n"
+        f"Your One-Time Password (OTP) is: {otp}\n\n"
+        "This OTP is valid for 10 minutes. Please do not share this code with anyone for security reasons.\n\n"
+        "If you did not request this, please ignore this email or contact the HRMS support team immediately.\n\n"
+        "Thank you,\n"
+        "HRMS Team\n"
+        "HR Management System\n"
+        "support@hrms.com"
+    )
     return _send_plain_email(to_email, subject, body)
 
 
 def send_password_reset_otp(to_email: str, otp: str) -> bool:
     subject = "Password Reset OTP"
-    body = f"Your password reset OTP is: {otp}\n\nValid for 10 minutes."
+    body = (
+        "Dear User,\n\n"
+        "We received a request to reset your password for your HRMS account.\n\n"
+        f"Your One-Time Password (OTP) is: {otp}\n\n"
+        "This OTP is valid for 10 minutes. Please do not share this code with anyone for security reasons.\n\n"
+        "If you did not request a password reset, please ignore this email or contact the HRMS support team immediately.\n\n"
+        "Thank you,\n"
+        "HRMS Team\n"
+        "HR Management System\n"
+        "support@hrms.com"
+    )
     return _send_plain_email(to_email, subject, body)
 
 
@@ -69,20 +90,30 @@ def send_account_created_alert(personal_email: str, company_name: str, created_b
     )
     return _send_plain_email(personal_email, subject, body)
 
-def send_login_credentials(personal_email: str, company_email: str, password: str,
-                           company_name: str, web_address: str, login_url: str, created_by: str) -> bool:
-    subject = "Login Details"
+def send_login_credentials(personal_email: str, company_email: str, 
+                           company_name: str, web_address: str, reset_url: str, created_by: str, full_name: str = "User") -> bool:
+    subject = "Welcome to HRMS - Your Account is Ready"
     body = (
-        "Hello,\n\n"
-        f"Your account has been created by {created_by}.\n\n"
-        "Login Details:\n"
-        f"Web Address: {web_address}\n"
-        f"Username: {company_email}\n"
-        f"Password: {password}\n\n"
-        "👉 Click here to login:\n"
-        f"{login_url}\n\n"
-        f"Regards,\n"
-        f"{company_name}\n"
+        f"Dear {full_name},\n\n"
+        "Welcome to **HRMS**!\n\n"
+        f"Your account has been successfully created by the {created_by}.\n"
+        "You can now access the HRMS portal using the details below.\n\n"
+        "---\n\n"
+        "**Login Information**\n\n"
+        f"🌐 Web Portal: {web_address}\n"
+        f"👤 Username: {company_email}\n\n"
+        "🔒 For security reasons, please set your password using the link below.\n\n"
+        "👉 **Set Your Password:**\n"
+        f"{reset_url}\n\n"
+        "---\n\n"
+        "**Important Security Note**\n\n"
+        "* Do not share your login credentials with anyone.\n"
+        "* Change your password after first login.\n\n"
+        "If you face any issues, please contact HRMS Support.\n\n"
+        "Regards,\n"
+        "**HRMS Team**\n"
+        "HR Management System\n"
+        "support@hrms.com"
     )
     return _send_plain_email(personal_email, subject, body)
 

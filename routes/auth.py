@@ -404,31 +404,44 @@ def reset_password():
     if new_password != confirm_password:
         return jsonify({'message': 'Passwords do not match'}), 400
 
+    user = None
+    # 1. Try to decode JWT reset_token
+    print(f"DEBUG: reset_token={reset_token[:10]}... email={data.get('email')} otp={data.get('otp')}")
     try:
         payload = jwt.decode(
             reset_token,
             current_app.config['SECRET_KEY'],
             algorithms=["HS256"]
         )
+        print(f"DEBUG: JWT Decoded! payload={payload}")
+        if payload.get('type') == 'password_reset':
+            user = User.query.get(payload['user_id'])
+    except Exception as e:
+        print(f"DEBUG: JWT Decode FAILED: {str(e)}")
+        # 2. Fallback: Check if reset_token is a valid OTP OR if otp is explicitly provided
+        email = data.get('email', '').lower().strip()
+        otp_candidate = data.get('otp') or reset_token
+        print(f"DEBUG: FALLBACK checking email={email} otp_candidate={otp_candidate}")
+        if email and otp_candidate:
+            user = User.query.filter_by(email=email, otp=str(otp_candidate)).first()
+            if user:
+                print(f"DEBUG: User found by OTP! expiry={user.otp_expiry}")
+            if user and user.otp_expiry and user.otp_expiry < datetime.utcnow():
+                print(f"DEBUG: OTP EXPIRED! now={datetime.utcnow()}")
+                user = None # OTP expired
 
-        if payload.get('type') != 'password_reset':
-            return jsonify({'message': 'Invalid token type'}), 401
+    if not user:
+        print(f"DEBUG: FINAL NO USER FOUND!")
+        return jsonify({'message': 'Invalid reset token or OTP'}), 401
 
-        user_id = payload['user_id']
-        user = User.query.get(user_id)
-
-        if not user:
-            return jsonify({'message': 'User not found'}), 404
-
+    try:
         user.password = generate_password_hash(new_password)
+        user.otp = None # Clear OTP after use
+        user.otp_expiry = None
         db.session.commit()
-
         return jsonify({'message': 'Password has been reset successfully'}), 200
-
-    except jwt.ExpiredSignatureError:
-        return jsonify({'message': 'Reset token has expired. Please start over.'}), 401
-    except jwt.InvalidTokenError:
-        return jsonify({'message': 'Invalid reset token'}), 401
+    except Exception as e:
+        return jsonify({'message': f'Error updating password: {str(e)}'}), 500
 
 @auth_bp.route('/change-password', methods=['POST'])
 @token_required

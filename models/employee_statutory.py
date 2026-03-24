@@ -78,3 +78,39 @@ class FullAndFinal(db.Model):
             'settlement': self.settlement_data,
             'clearance': self.exit_clearance
         }
+
+class PayrollLetter(db.Model):
+    __tablename__ = 'payroll_letters'
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
+    
+    letter_type = db.Column(db.String(50), nullable=False) # Increment, Promotion, etc.
+    effective_date = db.Column(db.Date, nullable=False)
+    
+    # Store dynamic fields as JSON
+    # For Increment: { "old_salary": ..., "new_salary": ... }
+    # For Promotion: { "old_designation": ..., "new_designation": ..., "new_salary": ... }
+    content_data = db.Column(db.JSON) 
+    
+    status = db.Column(db.String(20), default='ISSUED') # DRAFT, ISSUED
+    file_path = db.Column(db.String(255)) # Path to generated PDF if any
+    
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    employee = db.relationship('Employee', backref='payroll_letters')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'employee_id': self.employee_id,
+            'employee_name': self.employee.full_name if self.employee else 'Unknown',
+            'employee_no': self.employee.employee_id if self.employee else '',
+            'company_id': self.company_id,
+            'letter_type': self.letter_type,
+            'effective_date': self.effective_date.isoformat() if self.effective_date else None,
+            'content_data': self.content_data,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }

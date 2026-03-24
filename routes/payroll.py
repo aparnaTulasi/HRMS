@@ -14,7 +14,7 @@ from models.payroll import (
 from models.employee import Employee
 from models.company import Company
 from models.attendance import Attendance
-from models.employee_statutory import Form16, FullAndFinal
+from models.employee_statutory import Form16, FullAndFinal, PayrollLetter
 import calendar
 
 payroll_bp = Blueprint("payroll_bp", __name__)
@@ -37,6 +37,11 @@ def require_roles(*roles):
 
 
 def _company_id():
+    # If provided in query params and user is authorized, use it
+    req_cid = request.args.get("company_id")
+    if req_cid and g.user.role == "SUPER_ADMIN":
+        return int(req_cid)
+    
     cid = getattr(g.user, "company_id", None)
     if not cid:
         return None
@@ -1396,3 +1401,167 @@ def get_salary_register():
         "count": len(report_data),
         "period": f"{calendar.month_name[month]} {year}"
     }), 200
+
+@payroll_bp.get("/admin/payroll/dashboard")
+@token_required
+@require_roles("ADMIN", "SUPER_ADMIN")
+def get_payroll_dashboard():
+    cid = _company_id()
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+
+    if not month or not year:
+        now = datetime.utcnow()
+        month = month or now.month
+        year = year or now.year
+
+    # Aggregate Data
+    payslips = PaySlip.query.filter_by(
+        company_id=cid, 
+        pay_month=month, 
+        pay_year=year,
+        is_deleted=False
+    ).all()
+
+    total_payout = sum(ps.net_salary for ps in payslips)
+    processed_count = sum(1 for ps in payslips if ps.status == "FINAL")
+    draft_count = sum(1 for ps in payslips if ps.status == "DRAFT")
+    avg_salary = total_payout / len(payslips) if payslips else 0
+
+    # Calculate MoM Growth
+    prev_month = month - 1 if month > 1 else 12
+    prev_year = year if month > 1 else year - 1
+    prev_payslips = PaySlip.query.filter_by(
+        company_id=cid, 
+        pay_month=prev_month, 
+        pay_year=prev_year,
+        is_deleted=False
+    ).all()
+    prev_payout = sum(ps.net_salary for ps in prev_payslips)
+    
+    growth_pct = 0
+    if prev_payout > 0:
+        growth_pct = ((total_payout - prev_payout) / prev_payout) * 100
+    growth_str = f"{'+' if growth_pct >= 0 else ''}{growth_pct:.1f}%"
+
+    # Component Analysis
+    earnings_breakdown = {}
+    deductions_breakdown = {}
+    for ps in payslips:
+        for e in ps.earnings:
+            earnings_breakdown[e.component] = earnings_breakdown.get(e.component, 0) + e.amount
+        for d in ps.deductions:
+            deductions_breakdown[d.component] = deductions_breakdown.get(d.component, 0) + d.amount
+
+    # Dept-wise Distribution
+    dept_distribution = {}
+    for ps in payslips:
+        employee = Employee.query.get(ps.employee_id)
+        dept = employee.department if employee else "Unknown"
+        dept_distribution[dept] = dept_distribution.get(dept, 0) + ps.net_salary
+
+    # Recent Runs
+    recent_runs = []
+    # Fetch last 4 months
+    for i in range(4):
+        d = datetime(year, month, 1) - timedelta(days=i*30)
+        m, y = d.month, d.year
+        month_slips = PaySlip.query.filter_by(company_id=cid, pay_month=m, pay_year=y, is_deleted=False).all()
+        recent_runs.append({
+            "id": f"PAY-{y}{m:02d}",
+            "period": f"{calendar.month_name[m]} {y}",
+            "employees": len(month_slips),
+            "payout": sum(ps.net_salary for ps in month_slips),
+            "status": "Completed" if any(ps.status == "FINAL" for ps in month_slips) else "Pending"
+        })
+
+    # Statutory Status
+    stat_settings = StatutorySettings.query.filter_by(company_id=cid).first()
+    compliance = [
+        {"name": "Provident Fund (PF)", "status": "On Track" if stat_settings and stat_settings.enable_pf else "Not Configured"},
+        {"name": "ESIC Contribution", "status": "On Track" if stat_settings and stat_settings.enable_esi else "Not Configured"},
+        {"name": "Professional Tax", "status": "On Track"},
+        {"name": "TDS Remittance", "status": "Action Required" if draft_count > 0 else "On Track"}
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "summary": {
+                "totalPayout": total_payout,
+                "processed": processed_count,
+                "pending": draft_count,
+                "avgSalary": round(avg_salary, 2),
+                "growth": growth_str
+            },
+            "componentAnalysis": {
+                "earnings": [{"name": k, "value": v} for k, v in earnings_breakdown.items()],
+                "deductions": [{"name": k, "value": v} for k, v in deductions_breakdown.items()]
+            },
+            "deptDistribution": [{"name": k, "value": v} for k, v in dept_distribution.items()],
+            "recentRuns": recent_runs,
+            "compliance": compliance
+        }
+    }), 200
+
+# =========================================================
+# PAYROLL LETTERS (Increment, Promotion, etc.)
+# =========================================================
+
+@payroll_bp.get("/payroll/employees")
+@token_required
+def list_payroll_employees():
+    cid = _company_id()
+    if not cid:
+        return jsonify({"success": False, "message": "Company ID not found"}), 400
+    
+    # Get all employees for the company
+    employees = Employee.query.filter_by(company_id=cid).all()
+    
+    return jsonify({
+        "success": True, 
+        "data": [{
+            "id": e.id,
+            "employee_id": e.employee_id,
+            "name": e.full_name,
+            "department": e.department,
+            "designation": e.designation,
+            "current_salary": e.ctc
+        } for e in employees]
+    }), 200
+
+@payroll_bp.post("/payroll/letters")
+@token_required
+def create_payroll_letter():
+    cid = _company_id()
+    data = request.get_json(silent=True) or {}
+    
+    required = ["employee_id", "letter_type", "effective_date", "content_data"]
+    for field in required:
+        if field not in data:
+            return jsonify({"success": False, "message": f"{field} is required"}), 400
+            
+    letter = PayrollLetter(
+        employee_id=data["employee_id"],
+        company_id=cid,
+        letter_type=data["letter_type"],
+        effective_date=datetime.strptime(data["effective_date"], "%Y-%m-%d").date(),
+        content_data=data["content_data"],
+        status=data.get("status", "ISSUED")
+    )
+    
+    db.session.add(letter)
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 400
+        
+    return jsonify({"success": True, "data": letter.to_dict()}), 201
+
+@payroll_bp.get("/payroll/letters")
+@token_required
+def list_payroll_letters():
+    cid = _company_id()
+    letters = PayrollLetter.query.filter_by(company_id=cid).order_by(PayrollLetter.created_at.desc()).all()
+    return jsonify({"success": True, "data": [l.to_dict() for l in letters]}), 200

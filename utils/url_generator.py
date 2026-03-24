@@ -15,9 +15,16 @@ def generate_login_url(email, role, company=None):
     return f"https://hrms.com/{username}"
 
 def build_company_base_url(subdomain):
+    # Try to get host from request context if available, otherwise fallback to localhost
+    from flask import request
+    try:
+        host = request.host
+    except:
+        host = "localhost:5000"
+    
     if subdomain:
-        return f"http://{subdomain}.localhost:5000"
-    return "http://localhost:5000"
+        return f"http://{subdomain}.{host.split(':')[0]}:5000"
+    return f"http://{host}"
 
 def clean_domain(domain):
     if not domain:

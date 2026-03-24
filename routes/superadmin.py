@@ -1,10 +1,10 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, current_app, g
 from werkzeug.security import generate_password_hash
 import jwt
 from config import Config
 import secrets
 import string
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
@@ -18,6 +18,7 @@ from models.attendance import Attendance
 from leave.models import LeaveRequest
 from utils.decorators import token_required, role_required
 from utils.email_utils import send_login_credentials, send_account_created_alert
+import jwt
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 
 superadmin_bp = Blueprint("superadmin", __name__)
@@ -118,20 +119,21 @@ def create_admin():
 
     # Required fields validation
     required_fields = [
-        "company_id", "company_name", "full_name", "personal_email", 
-        "company_email", "password", "confirm_password", "department", 
-        "designation", "pay_grade", "ctc", "phone_number"
+        "company_id", "full_name",
+        "company_email", "password", "confirm_password"
     ]
     
     missing = [field for field in required_fields if not data.get(field)]
     if missing:
         return jsonify({"message": f"Missing required fields: {', '.join(missing)}"}), 400
 
-    # Validate CTC is a number
-    try:
-        ctc_val = float(data["ctc"])
-    except (ValueError, TypeError):
-        return jsonify({"message": "CTC must be a number"}), 400
+    # CTC is optional now
+    ctc_val = 0.0
+    if data.get("ctc"):
+        try:
+            ctc_val = float(data["ctc"])
+        except (ValueError, TypeError):
+            return jsonify({"message": "CTC must be a number"}), 400
 
     identifier = str(data["company_id"]).strip()
     company = None
@@ -192,10 +194,10 @@ def create_admin():
             personal_email=data.get("personal_email"),
             company_email=data.get("company_email"),
             phone_number=data.get("phone_number"),
-            department=data["department"],
-            designation=data["designation"],
-            pay_grade=data.get("pay_grade"),
-            ctc=float(data.get("ctc", 0.0)),
+            department=data.get("department") or "N/A",
+            designation=data.get("designation") or "N/A",
+            pay_grade=data.get("pay_grade") or "N/A",
+            ctc=float(data.get("ctc") or 0.0),
             employment_type=data.get("employment_type"),
             gender=data.get("gender"),
             date_of_birth=parse_date(data.get("date_of_birth")),
@@ -207,22 +209,36 @@ def create_admin():
         new_admin.email = admin_emp.company_email
         db.session.commit()
 
+        # Generate a reset token for the email link
+        reset_token = jwt.encode(
+            {
+                'user_id': new_admin.id,
+                'type': 'password_reset',
+                'exp': datetime.utcnow() + timedelta(minutes=60)
+            },
+            current_app.config['SECRET_KEY'],
+            algorithm="HS256"
+        )
+
         web_address = build_web_address(company.subdomain)
         login_url = build_common_login_url(company.subdomain)
         created_by = "Super Admin"
 
-        # Mail 1: Account Created
+        # Construct reset URL with token and email
+        # Generate OTP as a fallback
+        otp = new_admin.generate_otp()
+        reset_url = f"{login_url.replace('/login', '/reset-password')}?token={reset_token}&email={company_email}&otp={otp}"
         send_account_created_alert(personal_email, company.company_name, created_by)
 
         # Mail 2: Login Credentials
         email_sent = send_login_credentials(
             personal_email=personal_email,
             company_email=company_email,
-            password=raw_password,
             company_name=company.company_name,
             web_address=web_address,
-            login_url=login_url,
-            created_by=created_by
+            reset_url=reset_url,
+            created_by=created_by,
+            full_name=data.get("full_name") or "Admin"
         )
 
         return jsonify({
@@ -250,18 +266,20 @@ def create_user():
 
     # Required fields validation for user creation as well
     required_fields = [
-        "company_id", "full_name", "personal_email", 
-        "company_email", "department", "designation", 
-        "pay_grade", "ctc", "phone_number"
+        "company_id", "full_name",
+        "company_email"
     ]
     missing = [field for field in required_fields if not data.get(field)]
     if missing:
         return jsonify({"message": f"Missing required fields: {', '.join(missing)}"}), 400
 
-    try:
-        ctc_val = float(data["ctc"])
-    except (ValueError, TypeError):
-        return jsonify({"message": "CTC must be a number"}), 400
+    # CTC is optional now
+    ctc_val = 0.0
+    if data.get("ctc"):
+        try:
+            ctc_val = float(data["ctc"])
+        except (ValueError, TypeError):
+            return jsonify({"message": "CTC must be a number"}), 400
 
     if data.get("password") and data.get("password") != data.get("confirm_password"):
         return jsonify({"message": "Passwords do not match"}), 400
@@ -299,7 +317,7 @@ def create_user():
             return jsonify({"message": "User with this company email already exists"}), 409
 
     # Default to EMPLOYEE if role not provided
-    role = (data.get("role") or "EMPLOYEE").strip().upper()
+    role = (data.get("role") or data.get("employee_type") or "EMPLOYEE").strip().upper()
 
     try:
         # Auto-generate password if not provided
@@ -323,18 +341,18 @@ def create_user():
             user_id=new_user.id,
             company_id=company.id,
             employee_id=_generate_employee_id(company.id),
-            full_name=data.get("full_name"),
+            full_name=data.get("full_name") or data.get("name"),
             personal_email=data.get("personal_email"),
             company_email=data.get("company_email"),
-            phone_number=data.get("phone_number"),
-            department=data["department"],
-            designation=data["designation"],
-            pay_grade=data.get("pay_grade"),
-            ctc=float(data.get("ctc", 0.0)),
+            phone_number=data.get("phone_number") or data.get("phone"),
+            department=data.get("department") or "N/A",
+            designation=data.get("designation") or "N/A",
+            pay_grade=data.get("pay_grade") or "N/A",
+            ctc=float(data.get("ctc") or 0.0),
             employment_type=data.get("employment_type"),
             gender=data.get("gender"),
             date_of_birth=parse_date(data.get("date_of_birth")),
-            date_of_joining=parse_date(data.get("date_of_joining")),
+            date_of_joining=parse_date(data.get("date_of_joining") or data.get("joining_date")),
             manager_id=data.get("manager_id"),
         )
         db.session.add(emp)
@@ -342,17 +360,33 @@ def create_user():
         new_user.email = emp.company_email
         db.session.commit()
 
+        # Generate a reset token for the email link
+        reset_token = jwt.encode(
+            {
+                'user_id': new_user.id,
+                'type': 'password_reset',
+                'exp': datetime.utcnow() + timedelta(minutes=60)
+            },
+            current_app.config['SECRET_KEY'],
+            algorithm="HS256"
+        )
+
         web_address = build_web_address(company.subdomain)
         login_url = build_common_login_url(company.subdomain)
+        
+        # Construct reset URL with token and email
+        # Generate OTP as a fallback
+        otp = new_user.generate_otp()
+        reset_url = f"{login_url.replace('/login', '/reset-password')}?token={reset_token}&email={company_email}&otp={otp}"
         
         email_sent = send_login_credentials(
             personal_email=personal_email,
             company_email=company_email,
-            password=raw_password,
             company_name=company.company_name,
             web_address=web_address,
-            login_url=login_url,
-            created_by="Super Admin"
+            reset_url=login_url.replace("/login", "/reset-password"),
+            created_by="Super Admin",
+            full_name=data.get("full_name") or data.get("name") or "User"
         )
 
         return jsonify({
@@ -433,11 +467,11 @@ def _create_user_for_company(company_id: int, u: dict):
         send_login_credentials(
             personal_email=email,
             company_email=email,
-            password=temp_password,
             company_name=company.company_name,
             web_address=web_address,
-            login_url=login_url,
-            created_by="Super Admin"
+            reset_url=login_url.replace("/login", "/reset-password"),
+            created_by="Super Admin",
+            full_name=name or "User"
         )
         email_sent = True
     except Exception as e:

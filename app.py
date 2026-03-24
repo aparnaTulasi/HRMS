@@ -38,6 +38,8 @@ from routes.profile_routes import profile_bp
 from routes.audit_log import audit_bp
 from routes.support import support_bp
 from routes.calendar import calendar_bp
+from routes.assets import assets_bp
+from routes.id_card import id_card_bp
 
 from models.user_permission import UserPermission
 from models.department import Department
@@ -61,23 +63,8 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=10)
 # ✅ Unified CORS Configuration
 CORS(
     app,
-    resources={r"/*": {
-        "origins": [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-            "http://192.168.0.4:5173",
-            "http://192.168.1.15:5173",
-            "http://192.168.0.110:5173",
-            "http://192.168.1.33:5173",
-            "http://192.168.56.1:5173",
-            re.compile(r"^http://192\.168\..*:\d+$"),
-            re.compile(r"^http://100\..*:\d+$"),
-            re.compile(r"^http://localhost:\d+$"),
-            re.compile(r"^http://127\.0\.0\.1:\d+$")
-        ]
-    }},
-    allow_headers=["Content-Type", "Authorization"],
-    supports_credentials=True
+    resources={r"/*": {"origins": "*"}},
+    allow_headers=["Content-Type", "Authorization"]
 )
 
 db.init_app(app)
@@ -102,6 +89,26 @@ app.register_blueprint(profile_bp)
 app.register_blueprint(audit_bp)
 app.register_blueprint(support_bp, url_prefix="/api/support")
 app.register_blueprint(calendar_bp, url_prefix="/api/calendar")
+app.register_blueprint(assets_bp, url_prefix="/api/assets")
+app.register_blueprint(id_card_bp, url_prefix="/api/id-card")
+
+@app.route('/')
+def home():
+    return jsonify({
+        "message": "HRMS Backend is running",
+        "status": "success",
+        "endpoints": ["/api/auth", "/api/admin", "/api/employee", "/api/attendance"]
+    }), 200
+
+@app.route('/favicon.ico')
+def favicon():
+    return '', 204
+
+# Alias for misconfigured frontend hitting /login instead of /api/auth/login
+@app.route('/login', methods=['POST'])
+def root_login_alias():
+    from routes.auth import login as auth_login
+    return auth_login()
 
 if __name__ == "__main__":
     with app.app_context():

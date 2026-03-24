@@ -1,0 +1,17 @@
+--- USERS ---
+ID: 1 | Email: aparnatulasi7@gamil.com | Role: SUPER_ADMIN | CoID: None
+ID: 2 | Email: aparnatulasi7@gmail.com | Role: SUPER_ADMIN | CoID: None
+ID: 6 | Email: seelamaparnatulasi@gmail.com | Role: ADMIN | CoID: 1
+ID: 7 | Email: jayadittakavi7@gmail.com | Role: HR | CoID: 1
+ID: 8 | Email: sandhya.rani@futureinvo.com | Role: MANAGER | CoID: 1
+
+--- COMPANIES & BRANCHES ---
+Company: TEST LINE (ID: 1) | Branches: 1
+  - Branch: Hyderabad Office | Lat: 17.385 | Lng: 78.4867
+Company: jayadittakavi (ID: 2) | Branches: 1
+  - Branch: kakinada, main road Office | Lat: 17.385 | Lng: 78.4867
+Company: Futureinvo (ID: 3) | Branches: 1
+  - Branch: kakinada, main road Office | Lat: 17.385 | Lng: 78.4867
+
+--- ALL BRANCHES ---
+Total Branches in DB: 3

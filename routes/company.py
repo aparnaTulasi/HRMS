@@ -177,16 +177,26 @@ def create_user_and_email(company_id: int, email: str, role: str, name: str = ""
     db.session.add(user)
     db.session.flush()
 
-    # Call your existing mail function (do not change it)
+    # Call your existing mail function
     try:
+        # Get company details for the email
+        company = Company.query.get(company_id)
+        from utils.url_generator import build_web_address, build_common_login_url
+        web_address = build_web_address(company.subdomain)
+        login_url = build_common_login_url(company.subdomain)
+
         send_login_credentials(
-            user_email=email,
-            password=temp_password,
-            creator_web_host="",           # keep empty if you don’t use it
-            created_by_role="SUPER_ADMIN"  # as per your current flow
+            personal_email=email,
+            company_email=email,
+            company_name=company.company_name,
+            web_address=web_address,
+            reset_url=login_url.replace("/login", "/reset-password"),
+            created_by="Super Admin",
+            full_name=name or "User"
         )
         email_sent = True
-    except Exception:
+    except Exception as e:
+        print(f"Email error in company.py: {e}")
         email_sent = False
 
     return {
@@ -687,10 +697,15 @@ def list_companies():
     # Debug: Check if the frontend is sending the token for the list request
     print("AUTH HEADER (list_companies):", request.headers.get("Authorization"))
 
-    if g.user.role in ['ADMIN', 'HR']:
+    print(f"DEBUG: list_companies - User ID: {g.user.id}, Role: {g.user.role}, CoID: {g.user.company_id}")
+    if g.user.role in ['HR']:
+        print(f"DEBUG: list_companies - Filtering by CoID: {g.user.company_id}")
         companies = Company.query.filter_by(id=g.user.company_id).all()
     else:
+        # SUPER_ADMIN and ADMIN see all
+        print(f"DEBUG: list_companies - Returning ALL companies for role: {g.user.role}")
         companies = Company.query.order_by(Company.id.desc()).all()
+    print(f"DEBUG: list_companies - Found {len(companies)} companies")
 
     data = []
     for c in companies:

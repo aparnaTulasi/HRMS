@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify, g
+from flask import Blueprint, request, jsonify, current_app, g
 from werkzeug.security import generate_password_hash
 from models import db
 from models.user import User
@@ -7,10 +7,11 @@ from sqlalchemy.exc import IntegrityError
 from models.employee import Employee
 from models.company import Company
 from utils.decorators import token_required, role_required
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import logging
 from utils.email_utils import send_login_credentials, send_account_created_alert
+import jwt
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 from models.department import Department
 from models.designation import Designation
@@ -42,9 +43,9 @@ def get_employees():
                     (emp.company_email.split('@')[0] if emp.company_email else (user.email.split('@')[0] if user else '')),
             'name': emp.full_name or '',
             'email': emp.company_email or (user.email if user else ''),
-            'dept': emp.department or '',
-            'desig': emp.designation or '',
-            'type': user.role.capitalize() if user else 'Employee',
+            'department': emp.department or '',
+            'designation': emp.designation or '',
+            'role': user.role.capitalize() if user else 'Employee',
             'company': company.company_name if company else 'N/A',
             'company_id': emp.company_id,
             'phone': emp.phone_number or '',
@@ -315,9 +316,9 @@ def _create_employee_impl():
     if User.query.filter_by(email=email).first():
         return jsonify({'message': 'Email already exists'}), 400
 
-    # 4. Determine Role from employee_type or designation
+    # 4. Determine Role from employee_type, role, or designation
     designation = data.get('designation', '').strip()
-    employee_type = data.get('employee_type', '').strip().upper()
+    employee_type = (data.get('employee_type') or data.get('role') or '').strip().upper()
     username = data.get('username', '').strip() or email.split('@')[0]
 
     # Map type/designation to role
@@ -367,9 +368,9 @@ def _create_employee_impl():
     new_emp_id = generate_employee_id(prefix)
 
     # 7. Create Employee Profile
-    full_name = (data.get("full_name") or "").strip()
+    full_name = (data.get("full_name") or data.get("name") or "").strip()
     if not full_name:
-        return jsonify({"success": False, "message": "full_name is required"}), 400
+        return jsonify({"success": False, "message": "full_name or name is required"}), 400
 
     new_employee = Employee(
         user_id=new_user.id,
@@ -378,15 +379,15 @@ def _create_employee_impl():
         full_name=full_name,
         department=data.get('department'),
         designation=data.get('designation'),
-        date_of_joining=_parse_date(data.get('date_of_joining')),
+        date_of_joining=_parse_date(data.get('date_of_joining') or data.get('joining_date')),
         gender=data.get('gender'),
         personal_email=data.get('personal_email'),
-        pay_grade=data.get('pay_grade'),
-        ctc=float(data.get('ctc', 0.0)),
+        pay_grade=data.get('pay_grade') or 'N/A',
+        ctc=float(data.get('ctc', 0.0) or 0.0),
         employment_type=data.get('employment_type'),
         branch_id=_resolve_branch_id(data, company.id),
         manager_id=data.get('manager_id'),
-        phone_number=data.get('phone_number') or data.get('mobile_number'),
+        phone_number=data.get('phone_number') or data.get('mobile_number') or data.get('phone'),
         company_email=email
     )
     
@@ -406,14 +407,28 @@ def _create_employee_impl():
         login_url = build_common_login_url(company.subdomain) if company.subdomain else "#"
 
         send_account_created_alert(personal_email or email, company.company_name, created_by)
+        # Generate a reset token for the email link
+        reset_token = jwt.encode(
+            {
+                'user_id': new_employee.id,
+                'type': 'password_reset',
+                'exp': datetime.utcnow() + timedelta(minutes=60)
+            },
+            current_app.config['SECRET_KEY'],
+            algorithm="HS256"
+        )
+        # Generate OTP as a fallback
+        otp = new_employee.generate_otp()
+        reset_url = f"{login_url.replace('/login', '/reset-password')}?token={reset_token}&email={email or personal_email}&otp={otp}"
+
         send_login_credentials(
             personal_email=personal_email or email,
             company_email=email,
-            password=password,
             company_name=company.company_name,
             web_address=web_address,
-            login_url=login_url,
-            created_by=created_by
+            reset_url=reset_url,
+            created_by=created_by,
+            full_name=data.get("full_name") or data.get("name") or "User"
         )
         email_sent = True
     except Exception as email_err:
