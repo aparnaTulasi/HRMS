@@ -26,6 +26,7 @@ from routes.superadmin import superadmin_bp
 from routes.hr import hr_bp
 from routes.employee import employee_bp
 from routes.attendance import attendance_bp
+from routes.attendance_features import attendance_features_bp
 from routes.documents import documents_bp
 from routes.payroll import payroll_bp
 from routes.user import user_bp
@@ -40,6 +41,8 @@ from routes.support import support_bp
 from routes.calendar import calendar_bp
 from routes.assets import assets_bp
 from routes.id_card import id_card_bp
+from routes.wfh import wfh_bp
+from routes.feedback import feedback_bp
 
 from models.user_permission import UserPermission
 from models.department import Department
@@ -77,6 +80,7 @@ app.register_blueprint(superadmin_bp, url_prefix="/api/superadmin")
 app.register_blueprint(hr_bp, url_prefix="/api/hr")
 app.register_blueprint(employee_bp, url_prefix="/api")
 app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
+app.register_blueprint(attendance_features_bp) # url_prefix is defined in the blueprint
 app.register_blueprint(documents_bp, url_prefix="/api/documents")
 app.register_blueprint(payroll_bp, url_prefix="/api")
 app.register_blueprint(user_bp, url_prefix="/api/user")
@@ -91,6 +95,8 @@ app.register_blueprint(support_bp, url_prefix="/api/support")
 app.register_blueprint(calendar_bp, url_prefix="/api/calendar")
 app.register_blueprint(assets_bp, url_prefix="/api/assets")
 app.register_blueprint(id_card_bp, url_prefix="/api/id-card")
+app.register_blueprint(wfh_bp, url_prefix="/api/wfh")
+app.register_blueprint(feedback_bp, url_prefix="/api")
 
 @app.route('/')
 def home():

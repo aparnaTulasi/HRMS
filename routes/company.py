@@ -216,7 +216,7 @@ def create_user_and_email(company_id: int, email: str, role: str, name: str = ""
 @company_bp.route("/companies", methods=["POST"])
 @company_bp.route("/create-company", methods=["GET", "POST"])
 @token_required
-@role_required(["SUPER_ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN"])
 def create_company():
     # Fallback: if GET is used, we return the list of companies (same as list_companies)
     # This prevents 405 error if frontend calls GET on /create-company
@@ -444,7 +444,7 @@ def create_company():
 
 @company_bp.route("/branches", methods=["POST"])
 @token_required
-@role_required(["SUPER_ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN"])
 def create_branch():
     guard = require_super_admin()
     if guard: return guard
@@ -647,16 +647,14 @@ def toggle_branch_status(branch_id):
 
 @company_bp.route("/branches/map", methods=["GET"])
 @token_required
-@role_required(["SUPER_ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def get_branch_map():
-    guard = require_super_admin()
-    if guard: return guard
-
-    if not Branch: return jsonify({"success": False, "message": "Branch model not found"}), 500
-
     # Only branches with valid lat/lng
     query = db.session.query(Branch, Company).join(Company, Branch.company_id == Company.id)
     query = query.filter(Branch.latitude != None, Branch.longitude != None)
+    
+    if g.user.role in ['ADMIN', 'HR']:
+        query = query.filter(Branch.company_id == g.user.company_id)
 
     # Optional filter: ?status=Active
     status_filter = request.args.get("status")
@@ -892,3 +890,49 @@ def add_users_to_company(company_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"success": False, "message": "Server error", "error": str(e)}), 500
+# ----------------------------
+# 7) DASHBOARD STATS FOR COMPANY & BRANCH
+# ----------------------------
+
+@company_bp.route("/companies/stats", methods=["GET"])
+@token_required
+@role_required(["SUPER_ADMIN", "ADMIN"])
+def get_company_stats():
+    total_registered = Company.query.count()
+    # Mock data for system health and global reach as per UI
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_registered": total_registered,
+            "system_health": "Active",
+            "uptime": "100%",
+            "global_reach": "Live",
+            "monitoring": "24/7"
+        }
+    }), 200
+
+@company_bp.route("/branches/stats", methods=["GET"])
+@token_required
+@role_required(["SUPER_ADMIN", "ADMIN", "HR"])
+def get_branch_stats():
+    query = Branch.query
+    if g.user.role in ['ADMIN', 'HR']:
+        query = query.filter_by(company_id=g.user.company_id)
+    
+    total_branches = query.count()
+    active_locations = query.filter_by(status='Active').count()
+    
+    # Involved companies: for Super Admin, total companies. For Admin/HR, it's 1.
+    if g.user.role == 'SUPER_ADMIN':
+        involved_companies = Company.query.count()
+    else:
+        involved_companies = 1
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_branches": total_branches,
+            "active_locations": active_locations,
+            "involved_companies": involved_companies
+        }
+    }), 200

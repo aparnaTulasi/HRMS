@@ -60,10 +60,17 @@ class AttendanceRegularization(db.Model):
     
     attendance_date = db.Column(db.Date, nullable=False)
     
+    # UI specific fields
+    request_type = db.Column(db.String(50)) # MISSING_PUNCH, WRONG_PUNCH
+    punch_type = db.Column(db.String(50)) # PUNCH_IN, PUNCH_OUT, BOTH
+    
     # What they want to change to
     requested_status = db.Column(db.String(20))
     requested_punch_in = db.Column(db.DateTime)
     requested_punch_out = db.Column(db.DateTime)
+    
+    # Display fields
+    actual_time = db.Column(db.String(100)) # e.g. "Not Punched" or "11:00 AM"
     
     reason = db.Column(db.Text)
     

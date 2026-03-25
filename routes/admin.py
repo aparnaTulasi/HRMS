@@ -51,6 +51,8 @@ def get_employees():
             'phone': emp.phone_number or '',
             'status': user.status.capitalize() if user and user.status else 'Active',
             'joining_date': emp.date_of_joining.isoformat() if emp.date_of_joining else None,
+            'ctc': emp.ctc or 0.0,
+            'pay_grade': emp.pay_grade or 'N/A'
         })
     return jsonify({'success': True, 'data': result})
 
@@ -79,7 +81,9 @@ def get_employee(emp_id):
             'department': emp.department,
             'designation': emp.designation,
             'phone_number': emp.phone_number,
-            'status': user.status if user else 'ACTIVE'
+            'status': user.status if user else 'ACTIVE',
+            'ctc': emp.ctc or 0.0,
+            'pay_grade': emp.pay_grade or 'N/A'
         }
     })
 

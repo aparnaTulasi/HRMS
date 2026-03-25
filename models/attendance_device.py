@@ -7,8 +7,9 @@ class AttendanceDevice(db.Model):
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
     device_code = db.Column(db.String(50), nullable=False)
     device_name = db.Column(db.String(100))
+    ip_address = db.Column(db.String(45)) # Static IP for management
     location = db.Column(db.String(100))
-    platform = db.Column(db.String(20)) # android / biometric / web
+    device_type = db.Column(db.String(50)) # Biometric, Face Recognition
     is_active = db.Column(db.Boolean, default=True)
     last_seen_at = db.Column(db.DateTime)
     last_ip = db.Column(db.String(45))

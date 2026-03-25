@@ -12,6 +12,11 @@ class AttendancePunchLog(db.Model):
     source = db.Column(db.String(20), default="DEVICE") # DEVICE / MOBILE / WEB
     offline_batch_id = db.Column(db.String(50))
     client_event_id = db.Column(db.String(80), nullable=False)
+    
+    # Location for mobile punch
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    location_name = db.Column(db.String(255), nullable=True)
     status = db.Column(db.String(20), default='RECEIVED') # RECEIVED / PROCESSED / REJECTED
     reject_reason = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

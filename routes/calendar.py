@@ -27,8 +27,8 @@ def get_events():
 @calendar_bp.route('/events', methods=['POST'])
 @token_required
 def create_event():
-    # RBAC constraint: Only Super Admin and Admin can create
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN']:
+    # RBAC constraint: Only Super Admin, Admin, and HR can create
+    if g.user.role not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return jsonify({'message': 'Unauthorized to create events'}), 403
 
     data = request.get_json()
@@ -57,7 +57,7 @@ def create_event():
 @calendar_bp.route('/events/<int:id>', methods=['PUT', 'PATCH'])
 @token_required
 def update_event(id):
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN']:
+    if g.user.role not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return jsonify({'message': 'Unauthorized to edit events'}), 403
 
     data = request.get_json()
@@ -87,7 +87,7 @@ def update_event(id):
 @calendar_bp.route('/events/<int:id>', methods=['DELETE'])
 @token_required
 def delete_event(id):
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN']:
+    if g.user.role not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return jsonify({'message': 'Unauthorized to delete events'}), 403
 
     try:

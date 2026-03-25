@@ -1,6 +1,7 @@
 # models/hr_documents.py
 from datetime import datetime, date
 from models import db
+from models.employee import Employee
 
 class OnboardingCandidate(db.Model):
     __tablename__ = "onboarding_candidates"
@@ -162,8 +163,8 @@ class WFHRequest(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     company_id = db.Column(db.Integer, nullable=False, index=True)
 
-    employee = db.Column(db.String(150), nullable=False) # For display
-    employee_id = db.Column(db.Integer, nullable=True, index=True)
+    employee_name = db.Column(db.String(150), nullable=True, name="employee") # Map to existing DB column "employee"
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=True, index=True)
 
     from_date = db.Column(db.Date, nullable=False)
     to_date = db.Column(db.Date, nullable=False)
@@ -176,6 +177,8 @@ class WFHRequest(db.Model):
     action_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    employee_rel = db.relationship("Employee", foreign_keys=[employee_id])
 
 
 class HRDocument(db.Model):

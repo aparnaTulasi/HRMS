@@ -22,6 +22,41 @@ def get_tickets():
         traceback.print_exc()
         return jsonify({'message': 'Failed to fetch tickets', 'error': str(e)}), 500
 
+@support_bp.route('/dashboard-stats', methods=['GET'])
+@token_required
+def get_dashboard_stats():
+    """
+    Returns stats for the Concierge & Support header cards:
+    - Total Active
+    - Pending Action
+    - Resolution Rate
+    """
+    try:
+        # Filter by company if not Super Admin
+        q = SupportTicket.query
+        if g.user.role != 'SUPER_ADMIN':
+            q = q.filter_by(company_id=g.user.company_id)
+            
+        tickets = q.all()
+        
+        total_active = len([t for t in tickets if t.status in ['Open', 'In Progress']])
+        pending_action = len([t for t in tickets if t.status == 'Open'])
+        
+        resolved = len([t for t in tickets if t.status == 'Closed'])
+        total = len(tickets)
+        resolution_rate = round((resolved / total * 100), 1) if total > 0 else 0
+        
+        return jsonify({
+            'success': True,
+            'data': {
+                'total_active': total_active,
+                'pending_action': pending_action,
+                'resolution_rate': f"{resolution_rate}%"
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'message': 'Failed to fetch dashboard stats', 'error': str(e)}), 500
+
 @support_bp.route('/tickets', methods=['POST'])
 @token_required
 def create_ticket():

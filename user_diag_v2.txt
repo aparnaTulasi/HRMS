@@ -1,0 +1,6 @@
+--- FULL USER LIST ---
+ID: 1 | Email: aparnatulasi7@gamil.com | Role: SUPER_ADMIN | CoID: None
+ID: 2 | Email: aparnatulasi7@gmail.com | Role: SUPER_ADMIN | CoID: None
+ID: 6 | Email: seelamaparnatulasi@gmail.com | Role: ADMIN | CoID: 1
+ID: 7 | Email: jayadittakavi7@gmail.com | Role: HR | CoID: 1
+ID: 8 | Email: sandhya.rani@futureinvo.com | Role: MANAGER | CoID: 1

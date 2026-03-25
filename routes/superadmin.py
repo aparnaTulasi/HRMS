@@ -260,105 +260,127 @@ def create_admin():
 # ======================================================
 @superadmin_bp.route("/users", methods=["POST"])
 @token_required
-@role_required(["SUPER_ADMIN", "ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def create_user():
     data = request.get_json(force=True)
 
-    # Required fields validation for user creation as well
-    required_fields = [
-        "company_id", "full_name",
-        "company_email"
-    ]
+    # Required fields validation
+    required_fields = ["company_id", "full_name"]
     missing = [field for field in required_fields if not data.get(field)]
     if missing:
         return jsonify({"message": f"Missing required fields: {', '.join(missing)}"}), 400
 
-    # CTC is optional now
-    ctc_val = 0.0
-    if data.get("ctc"):
-        try:
-            ctc_val = float(data["ctc"])
-        except (ValueError, TypeError):
-            return jsonify({"message": "CTC must be a number"}), 400
-
-    if data.get("password") and data.get("password") != data.get("confirm_password"):
-        return jsonify({"message": "Passwords do not match"}), 400
-
     identifier = str(data["company_id"]).strip()
-    company = None
-    if identifier.isdigit():
-        company = Company.query.get(int(identifier))
-    
-    if not company:
-        company = Company.query.filter(func.lower(Company.company_code) == identifier.lower()).first()
-
-    if not company:
-        c_name = data.get("company_name") or data.get("name")
-        if c_name:
-            company = Company.query.filter(func.lower(Company.company_name) == c_name.strip().lower()).first()
+    company = Company.query.get(int(identifier)) if identifier.isdigit() else \
+              Company.query.filter(func.lower(Company.company_code) == identifier.lower()).first() or \
+              Company.query.filter(func.lower(Company.company_name) == (data.get("company_name") or data.get("name") or "").strip().lower()).first()
 
     if not company:
         return jsonify({"message": "Company not found"}), 404
 
-    # If the user is an ADMIN, they can only create users for their own company.
-    if g.user.role == 'ADMIN' and company.id != g.user.company_id:
-        return jsonify({"message": "Permission denied: You can only create users for your own company."}), 403
+    # Authorization Check
+    if g.user.role in ['ADMIN', 'HR'] and company.id != g.user.company_id:
+        return jsonify({"message": f"Permission denied: {g.user.role} can only create users for their own company."}), 403
 
-    company_email = data["company_email"].strip().lower()
-    personal_email = data["personal_email"].strip().lower()
-    existing_user = User.query.filter_by(email=company_email).first()
-    if existing_user:
-        # Provide a more helpful error if the user is soft-deleted
-        if hasattr(existing_user, 'status') and existing_user.status == 'DELETED':
-            return jsonify({
-                "message": "This email belongs to a soft-deleted user. To use this email, you must either permanently delete the old user (using ?force=true) or choose a different email."
-            }), 409
-        else:
-            return jsonify({"message": "User with this company email already exists"}), 409
-
-    # Default to EMPLOYEE if role not provided
-    role = (data.get("role") or data.get("employee_type") or "EMPLOYEE").strip().upper()
-
+    user_id = data.get("user_id")
+    target_user = None
+    
     try:
-        # Auto-generate password if not provided
-        if 'password' in data and data['password']:
-            raw_password = data['password']
+        if user_id:
+            # OPTION 1: Link to existing user account
+            target_user = User.query.get(user_id)
+            if not target_user:
+                return jsonify({"message": "Selected user account not found"}), 404
+            if target_user.company_id != company.id:
+                return jsonify({"message": "User belongs to a different company"}), 400
+            if target_user.employee_profile:
+                return jsonify({"message": "This user already has an employee profile"}), 400
         else:
-            raw_password = secrets.token_urlsafe(12)
-        hashed_password = generate_password_hash(raw_password)
+            # OPTION 2: Create new user account
+            company_email = data.get("company_email", "").strip().lower()
+            if not company_email:
+                return jsonify({"message": "Company email is required to create a new user"}), 400
+            
+            if User.query.filter_by(email=company_email).first():
+                return jsonify({"message": "User with this email already exists"}), 409
 
-        new_user = User(
-            email=company_email,
-            password=hashed_password,
-            role=role,
-            company_id=company.id,
-            status="ACTIVE"
-        )
-        db.session.add(new_user)
-        db.session.flush()
+            if data.get("password") and data.get("password") != data.get("confirm_password"):
+                return jsonify({"message": "Passwords do not match"}), 400
 
+            role = (data.get("role") or data.get("employee_type") or "EMPLOYEE").strip().upper()
+            raw_password = data.get('password') or secrets.token_urlsafe(12)
+            
+            target_user = User(
+                email=company_email,
+                username=data.get("username"),
+                password=generate_password_hash(raw_password),
+                role=role,
+                company_id=company.id,
+                status="ACTIVE"
+            )
+            db.session.add(target_user)
+            db.session.flush()
+
+        # Create Employee Record
         emp = Employee(
-            user_id=new_user.id,
+            user_id=target_user.id,
             company_id=company.id,
             employee_id=_generate_employee_id(company.id),
-            full_name=data.get("full_name") or data.get("name"),
+            full_name=data.get("full_name"),
             personal_email=data.get("personal_email"),
-            company_email=data.get("company_email"),
+            company_email=data.get("company_email") or target_user.email,
             phone_number=data.get("phone_number") or data.get("phone"),
             department=data.get("department") or "N/A",
             designation=data.get("designation") or "N/A",
+            branch_id=data.get("branch_id"), # Added Branch ID
             pay_grade=data.get("pay_grade") or "N/A",
             ctc=float(data.get("ctc") or 0.0),
-            employment_type=data.get("employment_type"),
+            employment_type=data.get("employment_type") or "Full Time",
             gender=data.get("gender"),
             date_of_birth=parse_date(data.get("date_of_birth")),
             date_of_joining=parse_date(data.get("date_of_joining") or data.get("joining_date")),
             manager_id=data.get("manager_id"),
         )
         db.session.add(emp)
-        # Sync requested: employees.company_email ↔ users.email
-        new_user.email = emp.company_email
+        
+        # Sync email back to user if it changed
+        if emp.company_email:
+            target_user.email = emp.company_email
+        if data.get("phone_number"):
+            target_user.phone = data.get("phone_number")
+            
         db.session.commit()
+
+        # Email only if it was a new user creation
+        email_sent = False
+        if not user_id:
+            try:
+                web_address = build_web_address(company.subdomain)
+                login_url = build_common_login_url(company.subdomain)
+                email_sent = send_login_credentials(
+                    personal_email=emp.personal_email or emp.company_email,
+                    company_email=emp.company_email,
+                    company_name=company.company_name,
+                    web_address=web_address,
+                    reset_url=login_url.replace("/login", "/reset-password"),
+                    created_by=g.user.role,
+                    full_name=emp.full_name
+                )
+            except Exception as e:
+                print(f"Error sending email: {e}")
+
+        return jsonify({
+            "message": "Employee created successfully",
+            "employee_id": emp.employee_id,
+            "user_id": target_user.id,
+            "email_sent": email_sent
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({"message": "Error creating user/employee", "error": str(e)}), 500
 
         # Generate a reset token for the email link
         reset_token = jwt.encode(
@@ -503,20 +525,34 @@ def _create_user_for_company(company_id: int, u: dict):
 # ======================================================
 @superadmin_bp.route("/dashboard-stats", methods=["GET"])
 @token_required
-@role_required(["SUPER_ADMIN"])
+@role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def get_dashboard_stats():
     try:
-        total_companies = Company.query.count()
-        total_branches = Branch.query.count()
-        total_admins = User.query.filter_by(role="ADMIN").count()
-        total_hrs = User.query.filter_by(role="HR").count()
-        total_managers = User.query.filter_by(role="MANAGER").count()
-        total_employees = Employee.query.count()
+        is_super = (g.user.role == 'SUPER_ADMIN')
+        cid = g.user.company_id
+        
+        # Base Queries
+        if is_super:
+            total_companies = Company.query.count()
+            total_branches = Branch.query.count()
+            total_admins = User.query.filter_by(role="ADMIN").count()
+            total_hrs = User.query.filter_by(role="HR").count()
+            total_managers = User.query.filter_by(role="MANAGER").count()
+            total_employees = Employee.query.count()
+        else:
+            # Stats filtered by company for ADMIN/HR
+            total_companies = 1 # Only their own
+            total_branches = Branch.query.filter_by(company_id=cid).count()
+            total_admins = User.query.filter_by(company_id=cid, role="ADMIN").count()
+            total_hrs = User.query.filter_by(company_id=cid, role="HR").count()
+            total_managers = User.query.filter_by(company_id=cid, role="MANAGER").count()
+            total_employees = Employee.query.filter_by(company_id=cid).count()
 
         # Department distribution
-        departments = db.session.query(
-            Employee.department, func.count(Employee.id)
-        ).group_by(Employee.department).all()
+        dept_q = db.session.query(Employee.department, func.count(Employee.id))
+        if not is_super:
+            dept_q = dept_q.filter(Employee.company_id == cid)
+        departments = dept_q.group_by(Employee.department).all()
 
         colors = ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16']
         dept_data = []
@@ -530,13 +566,12 @@ def get_dashboard_stats():
 
         # Attendance summary (for today)
         today = date.today()
-        attendance_counts = db.session.query(
-            Attendance.status, func.count(Attendance.attendance_id)
-        ).filter(Attendance.attendance_date == today).group_by(Attendance.status).all()
+        att_q = db.session.query(Attendance.status, func.count(Attendance.attendance_id)).filter(Attendance.attendance_date == today)
+        if not is_super:
+            att_q = att_q.filter(Attendance.company_id == cid)
+        attendance_counts = att_q.group_by(Attendance.status).all()
         
         att_dict = {status: count for status, count in attendance_counts}
-        # If total_employees > sum of logged states, maybe calculate 'Not Marked' 
-        # but the prompt wants to map the existing 5 UI elements
         attendance_summary = [
             {"label": "Present", "value": att_dict.get("Present", 0), "color": "#10b981"},
             {"label": "Absent", "value": att_dict.get("Absent", 0), "color": "#ef4444"},
@@ -545,45 +580,70 @@ def get_dashboard_stats():
             {"label": "WeekOff", "value": att_dict.get("WeekOff", 0), "color": "#6b7280"}
         ]
 
-        # Growth trend (Employee joins per month for the current year)
-        current_year = today.year
-        employees = db.session.query(Employee.date_of_joining).filter(
-            func.extract('year', Employee.date_of_joining) == current_year
-        ).all()
+        # Growth trend
+        emp_join_q = db.session.query(Employee.date_of_joining).filter(func.extract('year', Employee.date_of_joining) == today.year)
+        if not is_super:
+            emp_join_q = emp_join_q.filter(Employee.company_id == cid)
+        employees = emp_join_q.all()
         
         monthly_counts = [0] * 12
         for emp in employees:
             if emp.date_of_joining:
                 monthly_counts[emp.date_of_joining.month - 1] += 1
                 
-        # Calculate cumulative growth for the year
         revenue_trend = []
         cumulative = 0
         for count in monthly_counts:
             cumulative += count
             revenue_trend.append(cumulative)
 
-        # Pending Requests (from LeaveRequest)
-        pending_leaves = LeaveRequest.query.filter(
-            LeaveRequest.status.in_(['Pending', 'Pending Approval'])
-        ).order_by(LeaveRequest.created_at.desc()).limit(5).all()
-
-        pending_requests = []
-        req_colors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#3b82f6']
-        for i, req in enumerate(pending_leaves):
-            emp_name = req.employee.full_name if req.employee and req.employee.full_name else "Unknown"
-            initials = "".join([n[0] for n in emp_name.split() if n])[:2].upper() if emp_name else "U"
-            pending_requests.append({
-                "id": req.id,
-                "name": emp_name,
-                "initials": initials,
-                "type": "Leave",
-                "color": req_colors[i % len(req_colors)]
+        # Combined Pending Requests (Leave, WFH, Expenses)
+        combined_pending = []
+        
+        # 1. Leaves
+        l_pending = pending_q.order_by(LeaveRequest.created_at.desc()).limit(5).all()
+        for r in l_pending:
+            combined_pending.append({
+                "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
+                "type": "Leave Request", "date": r.created_at, "color": "#6366f1"
             })
+            
+        # 2. WFH
+        wfh_q = WFHRequest.query.filter_by(status='PENDING')
+        if not is_super: wfh_q = wfh_q.filter_by(company_id=cid)
+        wfh_pending = wfh_q.order_by(WFHRequest.created_at.desc()).limit(5).all()
+        for r in wfh_pending:
+            combined_pending.append({
+                "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
+                "type": "WFH Request", "date": r.created_at, "color": "#10b981"
+            })
+            
+        # 3. Expenses
+        exp_q = TravelExpense.query.filter_by(status='Pending')
+        if not is_super: exp_q = exp_q.filter_by(company_id=cid)
+        exp_pending = exp_q.order_by(TravelExpense.created_at.desc()).limit(5).all()
+        for r in exp_pending:
+            combined_pending.append({
+                "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
+                "type": "Expense Request", "date": r.created_at, "color": "#f59e0b"
+            })
+            
+        # Sort by date and take top 5
+        combined_pending.sort(key=lambda x: x['date'], reverse=True)
+        final_pending = combined_pending[:5]
+        
+        for p in final_pending:
+            name = p['name']
+            p['initials'] = "".join([n[0] for n in name.split() if n])[:2].upper() if name else "U"
+            if isinstance(p['date'], datetime):
+                p['date'] = p['date'].isoformat()
+
+        user_name = g.user.name if hasattr(g.user, 'name') and g.user.name else "Administrator"
 
         return jsonify({
             "success": True,
             "data": {
+                "user_name": user_name,
                 "stats": {
                     "total_companies": total_companies,
                     "total_branches": total_branches,
@@ -595,9 +655,13 @@ def get_dashboard_stats():
                 "departmentData": dept_data,
                 "attendanceSummary": attendance_summary,
                 "revenueTrend": revenue_trend,
-                "pendingRequests": pending_requests
+                "pendingRequests": final_pending
             }
         }), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "message": "Failed to fetch dashboard stats", "error": str(e)}), 500
     except Exception as e:
         return jsonify({"success": False, "message": "Failed to fetch dashboard stats", "error": str(e)}), 500
 

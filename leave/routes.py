@@ -10,6 +10,7 @@ from models.employee import Employee
 from models.user import User
 from models.audit_log import AuditLog
 from utils.decorators import token_required, role_required
+from sqlalchemy import func, case
 
 # Helper to parse date strings
 def _parse_date(date_str):
@@ -1320,14 +1321,21 @@ def get_pending_approvals():
     # Join with LeaveType and Employee to get the names for display
     leaves_with_data = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
         .join(Employee, LeaveRequest.employee_id == Employee.id)\
-        .add_columns(LeaveType.name.label("leave_type_name"), Employee.first_name, Employee.last_name)\
+        .add_columns(
+            LeaveType.name.label("leave_type_name"), 
+            Employee.full_name, 
+            Employee.department
+        )\
         .order_by(LeaveRequest.from_date.asc()).all()
     
     results = []
-    for leave_req, leave_type_name, first_name, last_name in leaves_with_data:
+    for leave_req, leave_type_name, full_name, dept in leaves_with_data:
         data = serialize(leave_req)
         data['leave_type_name'] = leave_type_name
-        data['employee_name'] = f"{first_name} {last_name}"
+        data['employee_name'] = full_name
+        data['dept'] = dept
+        data['applied'] = leave_req.created_at.strftime('%b %d, %Y') if leave_req.created_at else "N/A"
+        data['days'] = (leave_req.to_date - leave_req.from_date).days + 1 if leave_req.from_date and leave_req.to_date else 0
         results.append(data)
 
     return jsonify(results), 200

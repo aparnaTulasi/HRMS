@@ -12,10 +12,14 @@ from models.payroll import (
     SalaryComponent, SalaryStructure, StructureComponent, StatutorySettings
 )
 from models.employee import Employee
+from models.user import User
 from models.company import Company
 from models.attendance import Attendance
 from models.employee_statutory import Form16, FullAndFinal, PayrollLetter
+from models.employee_address import EmployeeAddress
+from models.employee_documents import EmployeeDocument
 import calendar
+from sqlalchemy import or_, func, and_
 
 payroll_bp = Blueprint("payroll_bp", __name__)
 
@@ -201,7 +205,7 @@ def _parse_date(value):
 # SUPER ADMIN - PAY GRADE (VIEW + PDF ONLY)
 # =========================================================
 @payroll_bp.get("/superadmin/paygrades")
-@require_roles("SUPER_ADMIN")
+@require_roles("SUPER_ADMIN", "HR")
 def superadmin_list_paygrades():
     cid = _company_id()
     rows = PayGrade.query.filter_by(company_id=cid, status="ACTIVE").order_by(PayGrade.id.desc()).all()
@@ -209,7 +213,7 @@ def superadmin_list_paygrades():
 
 
 @payroll_bp.get("/superadmin/paygrades/pdf")
-@require_roles("SUPER_ADMIN")
+@require_roles("SUPER_ADMIN", "HR")
 def superadmin_paygrades_pdf():
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
@@ -259,7 +263,7 @@ def superadmin_paygrades_pdf():
 # ACCOUNT - PAYGRADE (CRUD + PDF)
 # =========================================================
 @payroll_bp.get("/account/paygrades")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_list_paygrades():
     cid = _company_id()
     rows = PayGrade.query.filter_by(company_id=cid, status="ACTIVE").order_by(PayGrade.id.desc()).all()
@@ -267,7 +271,7 @@ def account_list_paygrades():
 
 
 @payroll_bp.post("/account/paygrades")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_create_paygrade():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -301,7 +305,7 @@ def account_create_paygrade():
 
 
 @payroll_bp.put("/account/paygrades/<int:paygrade_id>")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_update_paygrade(paygrade_id):
     cid = _company_id()
     row = PayGrade.query.filter_by(id=paygrade_id, company_id=cid, status="ACTIVE").first()
@@ -329,7 +333,7 @@ def account_update_paygrade(paygrade_id):
 
 
 @payroll_bp.delete("/account/paygrades/<int:paygrade_id>")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_delete_paygrade(paygrade_id):
     cid = _company_id()
     row = PayGrade.query.filter_by(id=paygrade_id, company_id=cid, status="ACTIVE").first()
@@ -341,7 +345,7 @@ def account_delete_paygrade(paygrade_id):
 
 
 @payroll_bp.get("/account/paygrades/pdf")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_paygrades_pdf():
     # reuse superadmin pdf function output
     return superadmin_paygrades_pdf()
@@ -351,7 +355,7 @@ def account_paygrades_pdf():
 # ACCOUNT - PAY ROLES (CRUD)
 # =========================================================
 @payroll_bp.get("/account/payroles")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_list_payroles():
     cid = _company_id()
     rows = PayRole.query.filter_by(company_id=cid, status="ACTIVE").order_by(PayRole.id.desc()).all()
@@ -359,7 +363,7 @@ def account_list_payroles():
 
 
 @payroll_bp.post("/account/payroles")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_create_payrole():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -389,7 +393,7 @@ def account_create_payrole():
 
 
 @payroll_bp.put("/account/payroles/<int:payrole_id>")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_update_payrole(payrole_id):
     cid = _company_id()
     row = PayRole.query.filter_by(id=payrole_id, company_id=cid, status="ACTIVE").first()
@@ -411,7 +415,7 @@ def account_update_payrole(payrole_id):
 
 
 @payroll_bp.delete("/account/payroles/<int:payrole_id>")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_delete_payrole(payrole_id):
     cid = _company_id()
     row = PayRole.query.filter_by(id=payrole_id, company_id=cid, status="ACTIVE").first()
@@ -426,15 +430,23 @@ def account_delete_payrole(payrole_id):
 # ADMIN - PAY SLIP (CRUD + PDF)
 # =========================================================
 @payroll_bp.get("/admin/payslips")
-@require_roles("ADMIN")
+@require_roles("ADMIN", "HR")
 def admin_list_payslips():
     cid = _company_id()
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    
     employee_id = request.args.get("employee_id", type=int)
     department_id = request.args.get("department_id", type=int)
     month = request.args.get("month", type=int)
     year = request.args.get("year", type=int)
 
     q = PaySlip.query.filter_by(company_id=cid, status="ACTIVE")
+    
+    if user_role == "HR":
+        # HR can only see Manager and Employee payslips
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+
     if employee_id:
         q = q.filter_by(employee_id=employee_id)
     if department_id:
@@ -584,12 +596,20 @@ def admin_generate_payslip():
 
 
 @payroll_bp.get("/admin/payslips/<int:payslip_id>")
-@require_roles("ADMIN")
+@require_roles("ADMIN", "HR")
 def admin_get_payslip(payslip_id):
     cid = _company_id()
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    
     ps = PaySlip.query.filter_by(id=payslip_id, company_id=cid, status="ACTIVE").first()
     if not ps:
         return jsonify({"success": False, "message": "Payslip not found"}), 404
+    
+    if user_role == "HR":
+        employee = Employee.query.get(ps.employee_id)
+        if not employee or not employee.user or employee.user.role not in ["MANAGER", "EMPLOYEE"]:
+            return jsonify({"success": False, "message": "Access Forbidden to this record"}), 403
+            
     return jsonify({"success": True, "data": ps.to_dict()}), 200
 
 
@@ -678,28 +698,28 @@ def admin_delete_payslip(payslip_id):
 # ACCOUNT - PAY SLIP (optional: allow ACCOUNT to manage too)
 # =========================================================
 @payroll_bp.get("/account/payslips")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_list_payslips():
     # same as admin list
     return admin_list_payslips()
 
 
 @payroll_bp.post("/account/payslips")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_create_payslip():
     # same as admin create
     return admin_create_payslip()
 
 
 @payroll_bp.put("/account/payslips/<int:payslip_id>")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_update_payslip(payslip_id):
     # same as admin update
     return admin_update_payslip(payslip_id)
 
 
 @payroll_bp.delete("/account/payslips/<int:payslip_id>")
-@require_roles("ACCOUNT")
+@require_roles("ACCOUNT", "HR")
 def account_delete_payslip(payslip_id):
     # same as admin delete
     return admin_delete_payslip(payslip_id)
@@ -752,12 +772,19 @@ def employee_get_my_payslip(payslip_id):
 # PDF - for Admin + Employee + Account (same layout)
 # =========================================================
 @payroll_bp.get("/admin/payslips/<int:payslip_id>/pdf")
-@require_roles("ADMIN")
+@require_roles("ADMIN", "HR")
 def admin_payslip_pdf(payslip_id):
     cid = _company_id()
+    user_role = getattr(g.user, "role", "EMPLOYEE")
     ps = PaySlip.query.filter_by(id=payslip_id, company_id=cid, status="ACTIVE").first()
     if not ps:
         return jsonify({"success": False, "message": "Payslip not found"}), 404
+        
+    if user_role == "HR":
+        employee = Employee.query.get(ps.employee_id)
+        if not employee or not employee.user or employee.user.role not in ["MANAGER", "EMPLOYEE"]:
+            return jsonify({"success": False, "message": "Access Forbidden to this record"}), 403
+
     return _generate_payslip_pdf(ps, f"payslip_{ps.employee_id}_{ps.pay_month}-{ps.pay_year}.pdf")
 
 
@@ -891,9 +918,8 @@ def account_create_payroll_request():
 
     req_row = PayrollChangeRequest(
         company_id=cid,
-        entity_type=entity_type,
-        action=action,
-        entity_id=entity_id,
+        request_type=entity_type,
+        employee_id=entity_id,
         payload=payload,
         requested_by=getattr(g.user, "id", None),
     )
@@ -903,23 +929,32 @@ def account_create_payroll_request():
 
 
 @payroll_bp.get("/superadmin/payroll/requests")
-@require_roles("SUPER_ADMIN")
+@require_roles("SUPER_ADMIN", "HR")
 def superadmin_list_requests():
     cid = _company_id()
-    rows = PayrollChangeRequest.query.filter_by(company_id=cid).order_by(PayrollChangeRequest.id.desc()).all()
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    
+    q = PayrollChangeRequest.query.filter_by(company_id=cid)
+    if user_role == "HR":
+        from models.user import User
+        q = q.outerjoin(Employee, PayrollChangeRequest.employee_id == Employee.id).outerjoin(User, Employee.user_id == User.id)
+        # HR sees global requests (null employee) OR requests for Manager/Employee
+        q = q.filter(or_(PayrollChangeRequest.employee_id == None, User.role.in_(["MANAGER", "EMPLOYEE"])))
+
+    rows = q.order_by(PayrollChangeRequest.id.desc()).all()
     return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
 
 
 @payroll_bp.get("/admin/payroll/requests")
-@require_roles("ADMIN")
+@require_roles("ADMIN", "HR")
 def admin_list_requests():
     cid = _company_id()
-    rows = PayrollChangeRequest.query.filter_by(company_id=cid).order_by(PayrollChangeRequest.id.desc()).all()
-    return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
+    # reuse superadmin logic
+    return superadmin_list_requests()
 
 
 @payroll_bp.post("/superadmin/payroll/requests/<int:req_id>/approve")
-@require_roles("SUPER_ADMIN")
+@require_roles("SUPER_ADMIN", "HR")
 def superadmin_approve_request(req_id):
     # Superadmin typically approves paygrade/payrole requests
     cid = _company_id()
@@ -930,7 +965,7 @@ def superadmin_approve_request(req_id):
         return jsonify({"success": False, "message": "Request already processed"}), 400
 
     # apply only for PAY_GRADE / PAY_ROLE
-    if req_row.entity_type not in ["PAY_GRADE", "PAY_ROLE"]:
+    if req_row.request_type not in ["PAY_GRADE", "PAY_ROLE"]:
         return jsonify({"success": False, "message": "Superadmin approves only PAY_GRADE/PAY_ROLE"}), 400
 
     _apply_request(req_row)
@@ -942,7 +977,7 @@ def superadmin_approve_request(req_id):
 
 
 @payroll_bp.post("/admin/payroll/requests/<int:req_id>/approve")
-@require_roles("ADMIN")
+@require_roles("ADMIN", "HR")
 def admin_approve_request(req_id):
     # Admin typically approves payslip requests
     cid = _company_id()
@@ -952,7 +987,7 @@ def admin_approve_request(req_id):
     if req_row.status != "PENDING":
         return jsonify({"success": False, "message": "Request already processed"}), 400
 
-    if req_row.entity_type != "PAY_SLIP":
+    if req_row.request_type != "PAY_SLIP":
         return jsonify({"success": False, "message": "Admin approves only PAY_SLIP"}), 400
 
     _apply_request(req_row)
@@ -1017,10 +1052,17 @@ def _apply_request(req_row: PayrollChangeRequest):
 # SALARY STRUCTURE ASSIGNMENT (Super Admin / Admin / Account)
 # =========================================================
 @payroll_bp.get("/superadmin/salary-assignments")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT")
+@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
 def list_salary_assignments():
     cid = _company_id()
-    rows = SalaryStructureAssignment.query.filter_by(company_id=cid, status="ACTIVE").order_by(SalaryStructureAssignment.id.desc()).all()
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    
+    q = SalaryStructureAssignment.query.filter_by(company_id=cid, status="ACTIVE")
+    if user_role == "HR":
+        q = q.join(Employee, SalaryStructureAssignment.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+        
+    rows = q.order_by(SalaryStructureAssignment.id.desc()).all()
     return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
 
 
@@ -1073,14 +1115,14 @@ def create_salary_assignment():
 # SALARY COMPONENTS (NEW)
 # =========================================================
 @payroll_bp.get("/superadmin/payroll/components")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def list_salary_components():
     cid = _company_id()
     rows = SalaryComponent.query.filter_by(company_id=cid, status="ACTIVE").all()
     return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
 
 @payroll_bp.post("/superadmin/payroll/components")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def create_salary_component():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1107,7 +1149,7 @@ def create_salary_component():
     return jsonify({"success": True, "data": comp.to_dict()}), 201
 
 @payroll_bp.delete("/superadmin/payroll/components/<int:comp_id>")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def delete_salary_component(comp_id):
     cid = _company_id()
     comp = SalaryComponent.query.filter_by(id=comp_id, company_id=cid).first()
@@ -1121,14 +1163,14 @@ def delete_salary_component(comp_id):
 # SALARY STRUCTURES (NEW)
 # =========================================================
 @payroll_bp.get("/superadmin/payroll/structures")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def list_salary_structures():
     cid = _company_id()
     rows = SalaryStructure.query.filter_by(company_id=cid, status="ACTIVE").all()
     return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
 
 @payroll_bp.post("/superadmin/payroll/structures")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def create_salary_structure():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1163,7 +1205,7 @@ def create_salary_structure():
 # STATUTORY SETTINGS (NEW)
 # =========================================================
 @payroll_bp.get("/superadmin/payroll/statutory")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def get_statutory_settings():
     cid = _company_id()
     st = StatutorySettings.query.filter_by(company_id=cid).first()
@@ -1174,7 +1216,7 @@ def get_statutory_settings():
     return jsonify({"success": True, "data": st.to_dict()}), 200
 
 @payroll_bp.put("/superadmin/payroll/statutory")
-@require_roles("SUPER_ADMIN", "ADMIN")
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def update_statutory_settings():
     cid = _company_id()
     st = StatutorySettings.query.filter_by(company_id=cid).first()
@@ -1200,16 +1242,22 @@ def update_statutory_settings():
 # UPDATED HELPERS
 # =========================================================
 @payroll_bp.get("/superadmin/employees-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT")
+@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
 def list_employees_dropdown():
     cid = _company_id()
-    rows = Employee.query.filter_by(company_id=cid).all()
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = Employee.query.filter_by(company_id=cid)
+    
+    if user_role == "HR":
+        q = q.join(User, Employee.user_id == User.id).filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+        
+    rows = q.all()
     data = [{"id": r.id, "name": r.full_name, "employee_id": r.employee_id} for r in rows]
     return jsonify({"success": True, "data": data}), 200
 
 
 @payroll_bp.get("/superadmin/paygrades-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT")
+@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
 def list_paygrades_dropdown():
     cid = _company_id()
     rows = PayGrade.query.filter_by(company_id=cid, status="ACTIVE").all()
@@ -1217,7 +1265,7 @@ def list_paygrades_dropdown():
     return jsonify({"success": True, "data": data}), 200
 
 @payroll_bp.get("/superadmin/structures-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT")
+@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
 def list_structures_dropdown():
     cid = _company_id()
     rows = SalaryStructure.query.filter_by(company_id=cid, status="ACTIVE").all()
@@ -1225,7 +1273,7 @@ def list_structures_dropdown():
     return jsonify({"success": True, "data": data}), 200
 
 @payroll_bp.get("/superadmin/components-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT")
+@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
 def list_components_dropdown():
     cid = _company_id()
     rows = SalaryComponent.query.filter_by(company_id=cid, status="ACTIVE").all()
@@ -1237,7 +1285,7 @@ def list_components_dropdown():
 # =========================================================
 
 @payroll_bp.route("/payroll/form16", methods=["GET"])
-@token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def get_form16():
     emp_id = request.args.get("employee_id")
     fy = request.args.get("fy")
@@ -1255,7 +1303,7 @@ def get_form16():
     return jsonify({"success": True, "data": record.to_dict()}), 200
 
 @payroll_bp.route("/payroll/form16", methods=["POST"])
-@token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def save_form16():
     data = request.get_json(silent=True) or {}
     cid = _company_id()
@@ -1291,7 +1339,7 @@ def save_form16():
 # =========================================================
 
 @payroll_bp.route("/payroll/fnf", methods=["GET"])
-@token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def get_fnf():
     cid = _company_id()
     emp_id = request.args.get("employee_id")
@@ -1307,7 +1355,7 @@ def get_fnf():
     return jsonify({"success": True, "data": [r.to_dict() for r in records]}), 200
 
 @payroll_bp.route("/payroll/fnf", methods=["POST"])
-@token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def save_fnf():
     data = request.get_json(silent=True) or {}
     cid = _company_id()
@@ -1362,12 +1410,19 @@ def get_salary_register():
         year = year or now.year
 
     # Fetch all active payslips for the given period and company
-    payslips = PaySlip.query.filter_by(
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = PaySlip.query.filter_by(
         company_id=cid, 
         pay_month=month, 
         pay_year=year,
         is_deleted=False
-    ).all()
+    )
+    
+    if user_role == "HR":
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+        
+    payslips = q.all()
 
     report_data = []
     for ps in payslips:
@@ -1402,9 +1457,200 @@ def get_salary_register():
         "period": f"{calendar.month_name[month]} {year}"
     }), 200
 
+@payroll_bp.get("/payroll/reports/income-tax")
+@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+def get_income_tax_report():
+    cid = _company_id()
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+    if not month or not year:
+        now = datetime.utcnow()
+        month, year = now.month, now.year
+
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = PaySlip.query.filter_by(company_id=cid, pay_month=month, pay_year=year, is_deleted=False)
+    if user_role == "HR":
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    
+    payslips = q.all()
+    report_data = []
+    
+    # Financial Year logic (April to March)
+    fy_start_year = year if month >= 4 else year - 1
+    
+    for ps in payslips:
+        emp = Employee.query.get(ps.employee_id)
+        if not emp: continue
+        
+        # PAN from Documents
+        pan_doc = EmployeeDocument.query.filter_by(employee_id=emp.id, document_type="PAN").first()
+        pan = pan_doc.document_number if pan_doc else "N/A"
+        
+        # TDS YTD
+        ytd_q = db.session.query(func.sum(PaySlip.calculated_tds)).filter(
+            PaySlip.employee_id == emp.id,
+            PaySlip.company_id == cid,
+            PaySlip.is_deleted == False
+        )
+        # Filter for current FY
+        ytd_q = ytd_q.filter(
+            or_(
+                and_(PaySlip.pay_year == fy_start_year, PaySlip.pay_month >= 4),
+                and_(PaySlip.pay_year == fy_start_year + 1, PaySlip.pay_month <= 3)
+            )
+        )
+        tds_ytd = ytd_q.scalar() or 0.0
+        
+        # Calculate Taxable Income (Approx: Gross * 12 or based on structured data if available)
+        # For simplicity in this report, we'll show Annual CTC or Gross * 12
+        taxable_income = ps.annual_ctc or (ps.gross_salary * 12)
+
+        report_data.append({
+            "eid": emp.employee_id,
+            "name": emp.full_name,
+            "pan": pan,
+            "taxable_income": f"₹{taxable_income:,.0f}",
+            "tds_month": f"₹{ps.calculated_tds:,.0f}",
+            "tds_ytd": f"₹{tds_ytd:,.0f}",
+            "regime": ps.tax_regime
+        })
+
+    return jsonify({"success": True, "data": report_data, "period": f"{calendar.month_name[month]} {year}"}), 200
+
+@payroll_bp.get("/payroll/reports/professional-tax")
+@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+def get_professional_tax_report():
+    cid = _company_id()
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+    if not month or not year:
+        now = datetime.utcnow()
+        month, year = now.month, now.year
+
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = PaySlip.query.filter_by(company_id=cid, pay_month=month, pay_year=year, is_deleted=False)
+    if user_role == "HR":
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    
+    payslips = q.all()
+    report_data = []
+    
+    for ps in payslips:
+        emp = Employee.query.get(ps.employee_id)
+        if not emp: continue
+        
+        # State from Address
+        addr = EmployeeAddress.query.filter_by(employee_id=emp.id, address_type="PRESENT").first()
+        state = addr.state if addr else "N/A"
+        
+        pt_amount = ps.deductions_dict.get("Professional Tax") or ps.deductions_dict.get("PT") or 0.0
+        
+        # PT Slab logic (Simplified)
+        slab = "> ₹15,000" if ps.gross_salary > 15000 else "Exempt"
+
+        report_data.append({
+            "eid": emp.employee_id,
+            "name": emp.full_name,
+            "state": state,
+            "gross": f"₹{ps.gross_salary:,.0f}",
+            "slab": slab,
+            "pt_amount": f"₹{pt_amount:,.0f}",
+            "status": "Remitted" if ps.status == "FINAL" else "Pending"
+        })
+
+    return jsonify({"success": True, "data": report_data, "period": f"{calendar.month_name[month]} {year}"}), 200
+
+@payroll_bp.get("/payroll/reports/general-ledger")
+@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+def get_general_ledger_report():
+    cid = _company_id()
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+    if not month or not year:
+        now = datetime.utcnow()
+        month, year = now.month, now.year
+
+    # Aggregated Ledger entries for the company
+    # General Ledger typically shows totals across the whole company
+    # But for HR, we should only show totals for their accessible roles?
+    # Usually GL is an Admin/Account role thing. But if HR accesses it, we filter.
+    
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = PaySlip.query.filter_by(company_id=cid, pay_month=month, pay_year=year, is_deleted=False)
+    if user_role == "HR":
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    
+    payslips = q.all()
+    
+    total_basic = 0.0
+    total_hra = 0.0
+    total_pf = 0.0
+    total_tds = 0.0
+    total_net = 0.0
+    
+    for ps in payslips:
+        total_basic += ps.earnings_dict.get("Basic", 0.0)
+        total_hra += ps.earnings_dict.get("HRA", 0.0)
+        total_pf += ps.deductions_dict.get("PF", 0.0) + ps.deductions_dict.get("Provident Fund", 0.0)
+        total_tds += ps.calculated_tds
+        total_net += ps.net_salary
+
+    report_date = datetime(year, month, 1).strftime("%d %b %Y")
+    data = [
+        {"date": report_date, "account": "Salary Payable", "desc": f"Basic Salary - {calendar.month_name[month]}", "debit": f"{total_basic:,.0f}", "credit": "-", "balance": f"{total_basic:,.0f}"},
+        {"date": report_date, "account": "HRA Payable", "desc": f"HRA Payout - {calendar.month_name[month]}", "debit": f"{total_hra:,.0f}", "credit": "-", "balance": f"{total_hra + total_basic:,.0f}"},
+        {"date": report_date, "account": "PF Payable", "desc": f"Employee PF - {calendar.month_name[month]}", "debit": "-", "credit": f"{total_pf:,.0f}", "balance": f"{total_hra + total_basic - total_pf:,.0f}"},
+        {"date": report_date, "account": "TDS Payable", "desc": f"TDS Deducted - {calendar.month_name[month]}", "debit": "-", "credit": f"{total_tds:,.0f}", "balance": f"{total_hra + total_basic - total_pf - total_tds:,.0f}"},
+        {"date": report_date, "account": "Bank Account", "desc": "Salary Disbursed", "debit": "-", "credit": f"{total_net:,.0f}", "balance": "0.00"}
+    ]
+
+    return jsonify({"success": True, "data": data, "period": f"{calendar.month_name[month]} {year}"}), 200
+
+@payroll_bp.get("/payroll/reports/accounts-payable")
+@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+def get_accounts_payable_report():
+    cid = _company_id()
+    month = request.args.get("month", type=int)
+    year = request.args.get("year", type=int)
+    if not month or not year:
+        now = datetime.utcnow()
+        month, year = now.month, now.year
+
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = PaySlip.query.filter_by(company_id=cid, pay_month=month, pay_year=year, is_deleted=False)
+    if user_role == "HR":
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    
+    payslips = q.all()
+    
+    total_salary = 0.0
+    total_pf = 0.0
+    total_pt = 0.0
+    total_tds = 0.0
+    
+    for ps in payslips:
+        if ps.status != "FINAL": # Only pending if not finalized? Or maybe just sum everything for current month.
+            # In the screenshot, it shows "Outstanding liabilities".
+            total_salary += ps.net_salary
+            total_pf += ps.deductions_dict.get("PF", 0.0) + ps.deductions_dict.get("Provident Fund", 0.0)
+            total_pt += ps.deductions_dict.get("Professional Tax", 0.0) + ps.deductions_dict.get("PT", 0.0)
+            total_tds += ps.calculated_tds
+
+    data = [
+        {"liability": "Unpaid Salaries", "amount": f"₹{total_salary:,.0f}", "due_date": f"05 {calendar.month_name[(month % 12) + 1]} {year if month < 12 else year+1}", "status": "Pending"},
+        {"liability": "PF Contributions", "amount": f"₹{total_pf:,.0f}", "due_date": "15th of next month", "status": "Accrued"},
+        {"liability": "Professional Tax", "amount": f"₹{total_pt:,.0f}", "due_date": "State specific", "status": "Accrued"},
+        {"liability": "TDS Payable", "amount": f"₹{total_tds:,.0f}", "due_date": "07th of next month", "status": "Accrued"}
+    ]
+
+    return jsonify({"success": True, "data": data, "period": f"{calendar.month_name[month]} {year}"}), 200
+
 @payroll_bp.get("/admin/payroll/dashboard")
-@token_required
-@require_roles("ADMIN", "SUPER_ADMIN")
+@require_roles("ADMIN", "SUPER_ADMIN", "HR")
 def get_payroll_dashboard():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1416,12 +1662,17 @@ def get_payroll_dashboard():
         year = year or now.year
 
     # Aggregate Data
-    payslips = PaySlip.query.filter_by(
+    user_role = getattr(g.user, "role", "EMPLOYEE")
+    q = PaySlip.query.filter_by(
         company_id=cid, 
         pay_month=month, 
         pay_year=year,
         is_deleted=False
-    ).all()
+    )
+    if user_role == "HR":
+        q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    payslips = q.all()
 
     total_payout = sum(ps.net_salary for ps in payslips)
     processed_count = sum(1 for ps in payslips if ps.status == "FINAL")
@@ -1431,12 +1682,16 @@ def get_payroll_dashboard():
     # Calculate MoM Growth
     prev_month = month - 1 if month > 1 else 12
     prev_year = year if month > 1 else year - 1
-    prev_payslips = PaySlip.query.filter_by(
+    pq = PaySlip.query.filter_by(
         company_id=cid, 
         pay_month=prev_month, 
         pay_year=prev_year,
         is_deleted=False
-    ).all()
+    )
+    if user_role == "HR":
+        pq = pq.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
+        pq = pq.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    prev_payslips = pq.all()
     prev_payout = sum(ps.net_salary for ps in prev_payslips)
     
     growth_pct = 0
@@ -1510,13 +1765,19 @@ def get_payroll_dashboard():
 
 @payroll_bp.get("/payroll/employees")
 @token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def list_payroll_employees():
     cid = _company_id()
     if not cid:
         return jsonify({"success": False, "message": "Company ID not found"}), 400
     
+    user_role = getattr(g.user, "role", "EMPLOYEE")
     # Get all employees for the company
-    employees = Employee.query.filter_by(company_id=cid).all()
+    q = Employee.query.filter_by(company_id=cid)
+    if user_role == "HR":
+        q = q.join(User, Employee.user_id == User.id).filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+        
+    employees = q.all()
     
     return jsonify({
         "success": True, 
@@ -1531,7 +1792,7 @@ def list_payroll_employees():
     }), 200
 
 @payroll_bp.post("/payroll/letters")
-@token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def create_payroll_letter():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1560,7 +1821,7 @@ def create_payroll_letter():
     return jsonify({"success": True, "data": letter.to_dict()}), 201
 
 @payroll_bp.get("/payroll/letters")
-@token_required
+@require_roles("SUPER_ADMIN", "ADMIN", "HR")
 def list_payroll_letters():
     cid = _company_id()
     letters = PayrollLetter.query.filter_by(company_id=cid).order_by(PayrollLetter.created_at.desc()).all()
