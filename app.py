@@ -43,6 +43,9 @@ from routes.assets import assets_bp
 from routes.id_card import id_card_bp
 from routes.wfh import wfh_bp
 from routes.feedback import feedback_bp
+from routes.loan_routes import loan_bp
+from routes.team_routes import team_bp
+from routes.recruitment_routes import recruit_bp
 
 from models.user_permission import UserPermission
 from models.department import Department
@@ -50,6 +53,10 @@ from models.designation import Designation
 from models.bank_details import BankDetails
 from models.branch import Branch
 from models.employee_statutory import Form16, FullAndFinal
+from models.squad import Squad
+from models.squad_member import SquadMember
+from models.job_posting import JobPosting
+from models.job_applicant import JobApplicant
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -97,6 +104,9 @@ app.register_blueprint(assets_bp, url_prefix="/api/assets")
 app.register_blueprint(id_card_bp, url_prefix="/api/id-card")
 app.register_blueprint(wfh_bp, url_prefix="/api/wfh")
 app.register_blueprint(feedback_bp, url_prefix="/api")
+app.register_blueprint(loan_bp, url_prefix="/api/loans")
+app.register_blueprint(team_bp)
+app.register_blueprint(recruit_bp)
 
 @app.route('/')
 def home():
