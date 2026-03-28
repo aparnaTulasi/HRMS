@@ -31,6 +31,8 @@ class LeaveRequest(db.Model):
     from_date = db.Column(db.Date, nullable=False)
     to_date = db.Column(db.Date, nullable=False)
     reason = db.Column(db.Text)
+    is_half_day = db.Column(db.Boolean, default=False)  # ✅ NEW
+    attachment_url = db.Column(db.String(255))         # ✅ NEW
     status = db.Column(db.String(50), default='Pending')  # Pending/Pending Approval/Approved/Rejected/Cancelled
     approved_by = db.Column(db.Integer, db.ForeignKey('employees.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

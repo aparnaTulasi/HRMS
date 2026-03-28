@@ -6,6 +6,65 @@ from models import db
 
 audit_bp = Blueprint("audit", __name__)
 
+# 🔹 Helplers for UI Formatting
+def _get_module(entity):
+    mapping = {
+        'User': 'Auth',
+        'AUTH': 'Auth',
+        'Employee': 'Employee',
+        'Attendance': 'Employee',
+        'LeaveRequest': 'Employee',
+        'Leave': 'Employee',
+        'Shift': 'Employee',
+        'Payroll': 'Finance',
+        'Loan': 'Finance',
+        'Payslip': 'Finance',
+        'Company': 'Company',
+        'Branch': 'Company',
+        'Department': 'Company',
+        'Designation': 'Company'
+    }
+    return mapping.get(entity, 'System')
+
+def _format_entity_id(entity, eid):
+    if not eid: return "N/A"
+    prefixes = {
+        'Employee': 'EMP',
+        'Company': 'COMP',
+        'Document': 'DOC',
+        'Payroll': 'PAY',
+        'User': 'USR'
+    }
+    prefix = prefixes.get(entity, 'SYS')
+    return f"{prefix}-{eid}"
+
+def _generate_details(log, user):
+    act = log.action.upper()
+    ent = log.entity
+    role = log.role or "System"
+    
+    if "LOGIN" in act:
+        return f"Successful login to {role} Dashboard"
+    
+    # Try to extract name from meta if available
+    name = "Record"
+    import json
+    try:
+        if log.meta:
+            meta_dict = json.loads(log.meta.replace("'", '"')) if isinstance(log.meta, str) else log.meta
+            name = meta_dict.get('name') or meta_dict.get('full_name') or meta_dict.get('company_name') or name
+    except:
+        pass
+
+    if "CREATE" in act:
+        return f"Created new {ent}: {name}"
+    if "UPDATE" in act:
+        return f"Updated {ent} details for {name}"
+    if "DELETE" in act:
+        return f"Deleted {ent}: {name}"
+    
+    return f"Performed {act} on {ent}"
+
 # 🔹 Admin / HR / Super Admin
 @audit_bp.route("/api/audit/logs", methods=["GET"])
 @token_required
@@ -24,19 +83,24 @@ def get_audit_logs():
     if request.args.get("user_id"):
         query = query.filter(AuditLog.user_id == request.args["user_id"])
     if request.args.get("action"):
-        query = query.filter(AuditLog.action == request.args["action"])
+        query = query.filter(AuditLog.action.ilike(f'%{request.args["action"]}%'))
     if request.args.get("entity"):
-        query = query.filter(AuditLog.entity == request.args["entity"])
-
+        query = query.filter(AuditLog.entity.ilike(f'%{request.args["entity"]}%'))
+    
+    # Module filter
+    module_filter = request.args.get("module")
+    
     page = int(request.args.get("page", 1))
     limit = int(request.args.get("limit", 20))
 
-    pagination = query.order_by(AuditLog.created_at.desc()) \
-                       .paginate(page=page, per_page=limit, error_out=False)
-
+    all_logs = query.order_by(AuditLog.created_at.desc()).all()
+    
     data = []
-    for log, user in pagination.items:
-        # Resolve performer name
+    for log, user in all_logs:
+        log_module = _get_module(log.entity)
+        if module_filter and module_filter.lower() != log_module.lower():
+            continue
+            
         performer_name = "System"
         if user:
             performer_name = user.name
@@ -45,25 +109,29 @@ def get_audit_logs():
 
         data.append({
             "id": log.id,
-            "user_id": log.user_id,
-            "performer_name": performer_name,
-            "role": log.role or (user.role if user else "SYSTEM"),
             "action": log.action,
             "entity": log.entity,
-            "entity_id": log.entity_id,
-            "method": log.method or "N/A",
-            "path": log.path or "N/A",
-            "status_code": log.status_code,
+            "entity_id": _format_entity_id(log.entity, log.entity_id),
+            "performer_name": performer_name,
+            "role": log.role or (user.role if user else "SYSTEM"),
+            "date_time": log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else "N/A",
             "ip_address": log.ip_address or "N/A",
-            "created_at": log.created_at.isoformat() if log.created_at else None
+            "details": _generate_details(log, user),
+            "module": log_module
         })
+
+    # Manual pagination after module filtering
+    total = len(data)
+    start = (page - 1) * limit
+    end = start + limit
+    paginated_data = data[start:end]
 
     return jsonify({
         "success": True,
         "page": page,
         "limit": limit,
-        "total": pagination.total,
-        "data": data
+        "total": total,
+        "data": paginated_data
     })
 
 

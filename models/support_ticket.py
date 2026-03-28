@@ -11,6 +11,7 @@ class SupportTicket(db.Model):
     priority = db.Column(db.String(50), nullable=False, default='Medium')
     status = db.Column(db.String(50), nullable=False, default='Open')
     description = db.Column(db.Text, nullable=False)
+    attachment_url = db.Column(db.String(255), nullable=True)
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=True)
     created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True) # or super_admins
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -25,6 +26,7 @@ class SupportTicket(db.Model):
             'priority': self.priority,
             'status': self.status,
             'description': self.description,
+            'attachment_url': self.attachment_url,
             'company_id': self.company_id,
             'created_by': self.created_by,
             'date': self.created_at.strftime('%Y-%m-%d'),

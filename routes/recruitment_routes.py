@@ -3,7 +3,7 @@ from models import db
 from models.job_posting import JobPosting
 from models.job_applicant import JobApplicant
 from models.department import Department
-from utils.decorators import token_required
+from utils.decorators import token_required, role_required
 from datetime import date, datetime
 from sqlalchemy import func
 
@@ -11,6 +11,7 @@ recruit_bp = Blueprint('recruitment', __name__)
 
 @recruit_bp.route('/api/recruitment/stats', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_recruitment_stats():
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -31,7 +32,7 @@ def get_recruitment_stats():
     # 4. Offers Made
     offers_made = db.session.query(func.count(JobApplicant.id)).join(JobPosting).filter(
         JobPosting.company_id == company_id,
-        JobApplicant.current_stage == 'Hired' # Or add an 'Offer' stage if needed
+        JobApplicant.current_stage == 'Offer' # Changed to match typical workflow
     ).scalar() or 0
 
     return jsonify({
@@ -46,6 +47,7 @@ def get_recruitment_stats():
 
 @recruit_bp.route('/api/recruitment/jobs', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_jobs():
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -69,6 +71,7 @@ def get_jobs():
 
 @recruit_bp.route('/api/recruitment/jobs', methods=['POST'])
 @token_required
+@role_required(['HR'])
 def post_job():
     data = request.get_json()
     company_id = g.user.company_id
@@ -106,6 +109,7 @@ def post_job():
 
 @recruit_bp.route('/api/recruitment/jobs/<int:job_id>', methods=['DELETE'])
 @token_required
+@role_required(['HR'])
 def delete_job(job_id):
     job = JobPosting.query.get(job_id)
     if not job:
@@ -117,6 +121,7 @@ def delete_job(job_id):
 
 @recruit_bp.route('/api/recruitment/jobs/<int:job_id>/applicants', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_job_applicants(job_id):
     applicants = JobApplicant.query.filter_by(job_id=job_id).all()
     return jsonify({
@@ -126,6 +131,7 @@ def get_job_applicants(job_id):
 
 @recruit_bp.route('/api/recruitment/applicants/<int:app_id>/status', methods=['PATCH'])
 @token_required
+@role_required(['HR'])
 def update_applicant_status(app_id):
     data = request.get_json()
     applicant = JobApplicant.query.get(app_id)
@@ -135,3 +141,32 @@ def update_applicant_status(app_id):
     applicant.current_stage = data.get('status')
     db.session.commit()
     return jsonify({"success": True, "message": "Status updated"})
+
+@recruit_bp.route('/api/recruitment/applicants', methods=['GET'])
+@token_required
+@role_required(['HR'])
+def get_all_applicants():
+    company_id = g.user.company_id
+    if company_id is None and g.user.role == 'SUPER_ADMIN':
+        company_id = request.args.get('company_id', 1, type=int)
+        
+    applicants = db.session.query(JobApplicant).join(JobPosting).filter(JobPosting.company_id == company_id).all()
+    return jsonify({
+        "success": True,
+        "data": [a.to_dict() for a in applicants]
+    })
+
+@recruit_bp.route('/api/recruitment/jobs/form-options', methods=['GET'])
+@token_required
+@role_required(['HR'])
+def get_job_form_options():
+    company_id = g.user.company_id
+    departments = Department.query.filter_by(company_id=company_id).all()
+    return jsonify({
+        "success": True,
+        "data": {
+            "departments": [{"id": d.id, "name": d.department_name} for d in departments],
+            "employment_types": ["Full-time", "Contract", "Part-time", "Internship"],
+            "locations": ["Remote", "Office", "Hybrid"]
+        }
+    })

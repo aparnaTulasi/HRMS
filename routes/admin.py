@@ -51,7 +51,6 @@ def get_employees():
             'phone': emp.phone_number or '',
             'status': user.status.capitalize() if user and user.status else 'Active',
             'joining_date': emp.date_of_joining.isoformat() if emp.date_of_joining else None,
-            'ctc': emp.ctc or 0.0,
             'pay_grade': emp.pay_grade or 'N/A'
         })
     return jsonify({'success': True, 'data': result})
@@ -82,7 +81,6 @@ def get_employee(emp_id):
             'designation': emp.designation,
             'phone_number': emp.phone_number,
             'status': user.status if user else 'ACTIVE',
-            'ctc': emp.ctc or 0.0,
             'pay_grade': emp.pay_grade or 'N/A'
         }
     })
@@ -138,15 +136,47 @@ def update_employee(emp_id):
         return jsonify({'message': 'Employee not found'}), 404
         
     data = request.get_json(force=True) or {}
+    
+    # Update user account details if provided
+    if emp.user:
+        if 'company_email' in data:
+            emp.user.email = data['company_email'].strip().lower()
+        if 'username' in data:
+            emp.user.username = data['username'].strip()
+        if 'password' in data and data['password']:
+            from werkzeug.security import generate_password_hash
+            emp.user.password = generate_password_hash(data['password'])
+        if 'status' in data:
+            emp.user.status = data['status'].upper()
+
     # Update employee fields
-    for field in ['full_name', 'department', 'designation', 'phone_number', 'personal_email']:
+    # Fields that can be directly mapped
+    direct_fields = ['full_name', 'department', 'designation', 'phone_number', 'personal_email', 'pay_grade', 'employment_type', 'gender', 'company_email']
+    for field in direct_fields:
         if field in data:
             setattr(emp, field, data[field])
             
-    if 'status' in data and emp.user:
-        emp.user.status = data['status']
+    # Complex fields
+    if 'date_of_joining' in data or 'joining_date' in data:
+        emp.date_of_joining = _parse_date(data.get('date_of_joining') or data.get('joining_date'))
+        
+    if 'branch_id' in data:
+        emp.branch_id = _resolve_branch_id(data, emp.company_id)
+        
+    if 'manager_id' in data:
+        emp.manager_id = data['manager_id']
+
+    # Explicitly ignore CTC
+    if 'ctc' in data:
+        # We don't save CTC
+        pass
     
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'Update failed: {str(e)}'}), 500
+        
     log_action("UPDATE_EMPLOYEE", "Employee", emp_id, 200, meta=data)
     return jsonify({'success': True, 'message': 'Employee updated successfully'})
 
@@ -178,6 +208,8 @@ def generate_employee_id(company_code: str) -> str:
 @role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
 def get_dropdown_data():
     company_id = g.user.company_id
+    if company_id is None and g.user.role == 'SUPER_ADMIN':
+        company_id = request.args.get('company_id', type=int)
     
     # If Super Admin, they might want all companies or a specific one? 
     # Usually dropdowns are context specific.
@@ -200,7 +232,7 @@ def get_dropdown_data():
     ).all()
 
     return jsonify({
-        "success": true,
+        "success": True,
         "data": {
             "departments": [{"id": d.id, "name": d.department_name} for d in departments],
             "designations": [{"id": d.id, "name": d.designation_name} for d in designations],
@@ -208,7 +240,8 @@ def get_dropdown_data():
             "paygrades": [{"id": p.id, "name": p.grade_name} for p in paygrades],
             "managers": [{"id": m.id, "name": m.full_name} for m in managers],
             "users": [{"id": u.id, "email": u.email} for u in eligible_users],
-            "employment_types": ["Full-time", "Part-time", "Intern", "Contract", "Freelance"]
+            "employment_types": ["Full-time", "Part-time", "Intern", "Contract", "Freelance"],
+            "companies": [{"id": c.id, "name": c.company_name} for c in Company.query.all()] if g.user.role == 'SUPER_ADMIN' else []
         }
     }), 200
 
@@ -387,7 +420,6 @@ def _create_employee_impl():
         gender=data.get('gender'),
         personal_email=data.get('personal_email'),
         pay_grade=data.get('pay_grade') or 'N/A',
-        ctc=float(data.get('ctc', 0.0) or 0.0),
         employment_type=data.get('employment_type'),
         branch_id=_resolve_branch_id(data, company.id),
         manager_id=data.get('manager_id'),

@@ -8,7 +8,8 @@ class Squad(db.Model):
     company_id = db.Column(db.Integer, db.ForeignKey('companies.id'), nullable=False)
     squad_name = db.Column(db.String(100), nullable=False)
     project_name = db.Column(db.String(100))
-    squad_type = db.Column(db.String(50), default='IT') # IT, Non-IT
+    department = db.Column(db.String(100)) # IT Department, Non-IT Department
+    squad_type = db.Column(db.String(50), default='General Team') # General Team, Project Wise
     status = db.Column(db.String(20), default='Active')
     
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -21,6 +22,7 @@ class Squad(db.Model):
             "company_id": self.company_id,
             "squad_name": self.squad_name,
             "project_name": self.project_name,
+            "department": self.department,
             "squad_type": self.squad_type,
             "status": self.status,
             "member_count": len(self.members)

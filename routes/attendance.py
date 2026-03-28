@@ -246,15 +246,21 @@ def list_attendance():
         emp = Employee.query.get(r.employee_id)
         user = User.query.get(emp.user_id) if emp else None
 
+        s_name = "General Shift"
+        if r.shift_id:
+            s_obj = Shift.query.get(r.shift_id)
+            if s_obj: s_name = s_obj.shift_name
+
         output.append({
             "id": r.attendance_id,
             "attendance_id": r.attendance_id,
-            "employeeHeight": emp.employee_id if emp else "",  # Not sure if height is needed, but keeping for parity if it was there (Wait, no, it was employee_id)
+            "employeeHeight": emp.employee_id if emp else "",
             "employeeId": emp.employee_id if emp else "",
             "name": f"{emp.first_name} {emp.last_name}" if emp else "",
             "role": user.role if user else None,
             "department": emp.department if emp else None,
             "status": r.status,
+            "shift": s_name,
             "remarks": getattr(r, "remarks", ""),
             "loggedTime": _format_logged_time(r.total_minutes),
             "loginAt": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else None,
@@ -1102,7 +1108,7 @@ def dashboard_stats():
     today = date.today()
     company_id = g.user.company_id
     if g.user.role == 'SUPER_ADMIN':
-        company_id = request.args.get("company_id") or company_id
+        company_id = request.args.get("company_id", type=int) or company_id
 
     # 1. Summary Counts
     att_query = Attendance.query.filter_by(attendance_date=today)
@@ -1112,15 +1118,16 @@ def dashboard_stats():
     att_today = att_query.all()
     
     summary = {
-        "Present": 0,
-        "Absent": 0,
-        "Half Day": 0,
-        "Late": 0,
+        "PRESENT": 0,
+        "ABSENT": 0,
+        "HALF DAY": 0,
+        "LATE": 0,
         "WFH": 0
     }
     for r in att_today:
-        if r.status in summary:
-            summary[r.status] += 1
+        status_key = r.status.upper()
+        if status_key in summary:
+            summary[status_key] += 1
 
     # 2. Shift-wise Distribution
     shift_counts = {}
@@ -1174,7 +1181,9 @@ def dashboard_stats():
             "badge": "success" if r.status == "Present" else "danger" if r.status == "Absent" else "warning",
             "shift": s_name,
             "in": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else "-",
-            "out": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else "-"
+            "out": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else "-",
+            "punch_in": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else "-",
+            "punch_out": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else "-"
         })
 
     return jsonify({

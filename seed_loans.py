@@ -1,84 +1,48 @@
-from app import app
-from models import db
-from models.loan import Loan
-from models.employee import Employee
-from models.user import User
-from datetime import datetime, date
+import sqlite3
+import os
+from datetime import datetime, timedelta
+
+db_path = os.path.join(os.getcwd(), 'instance', 'hrms.db')
 
 def seed_loans():
-    with app.app_context():
-        db.create_all()
-        # Seed for Company 3 (where Admin 6 and HR 7 are)
-        TARGET_COMPANY_ID = 3
-        
-        # 1. Create/Find Employees if they don't exist
-        names = ["Rajesh Kumar", "Sneha Patel", "Amit Singh", "Priya Sharma"]
-        emps = []
-        for name in names:
-            emp = Employee.query.filter_by(full_name=name, company_id=TARGET_COMPANY_ID).first()
-            if not emp:
-                # Create dummy user first
-                email = name.lower().replace(" ", ".") + "@example.com"
-                user = User(email=email, password="password", role="EMPLOYEE", company_id=TARGET_COMPANY_ID, status="ACTIVE")
-                db.session.add(user)
-                db.session.flush()
-                
-                emp = Employee(
-                    user_id=user.id,
-                    company_id=TARGET_COMPANY_ID,
-                    full_name=name,
-                    employee_id=f"EMP-{user.id}",
-                    designation="Staff"
-                )
-                db.session.add(emp)
-                db.session.flush()
-            emps.append(emp)
+    if not os.path.exists(db_path):
+        print(f"Database not found at {db_path}")
+        return
 
-        # 2. Clear existing loans for consistency
-        db.session.query(Loan).delete()
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
 
-        # 3. Add loans matching UI
-        loans_data = [
-            {"emp": emps[0], "amount": 50000, "type": "Personal", "status": "ACTIVE", "emi": 5000, "interest": 8.5},
-            {"emp": emps[1], "amount": 200000, "type": "Home Renovation", "status": "APPROVED", "emi": 10000, "interest": 9.0},
-            {"emp": emps[2], "amount": 20000, "type": "Emergency", "status": "PAID", "emi": 4000, "interest": 8.0},
-            {"emp": emps[3], "amount": 100000, "type": "Personal", "status": "PENDING", "emi": 8500, "interest": 8.5},
-        ]
+    # Get sample employees
+    cursor.execute("SELECT id, full_name FROM employees LIMIT 5")
+    employees = cursor.fetchall()
+    if not employees:
+        print("No employees found to seed loans.")
+        return
 
-        for data in loans_data:
-            loan = Loan(
-                company_id=TARGET_COMPANY_ID,
-                employee_id=data["emp"].id,
-                loan_type=data["type"],
-                amount=data["amount"],
-                interest_rate=data["interest"],
-                tenure_months=12,
-                emi=data["emi"],
-                status=data["status"],
-                disbursement_date=date(2024, 3, 1) if data["status"] != "PENDING" else None
-            )
-            db.session.add(loan)
+    # Sample Data from UI
+    # Rajesh Kumar (#101), ₹50,000, Personal, Active, EMI ₹5,000
+    # Sneha Patel (#102), ₹2,00,000, Home Renovation, Approved, EMI ₹10,000
+    # Amit Singh (#103), ₹20,000, Emergency, Paid, EMI ₹4,000
+    # Priya Sharma (#104), ₹1,00,000, Personal, Pending, EMI ₹8,500
 
-        # Add more active loans to reach count of 24 and total disbursed ₹12.5L
-        current_sum = sum(d["amount"] for d in loans_data if d["status"] in ["ACTIVE", "APPROVED", "PAID"])
-        remaining_sum = 1250000 - current_sum
-        
-        for i in range(23):
-            loan = Loan(
-                company_id=TARGET_COMPANY_ID,
-                employee_id=emps[0].id,
-                loan_type="Other",
-                amount=remaining_sum / 23,
-                interest_rate=8.5,
-                tenure_months=12,
-                emi=5000,
-                status="ACTIVE",
-                disbursement_date=date(2024, 2, 1)
-            )
-            db.session.add(loan)
+    loan_samples = [
+        ("Personal", 50000.0, 8.5, 12, 5000.0, "Active", datetime.now() - timedelta(days=60)),
+        ("Home Renovation", 200000.0, 8.5, 24, 10000.0, "Approved", datetime.now() - timedelta(days=30)),
+        ("Emergency", 20000.0, 8.5, 6, 4000.0, "Paid", datetime.now() - timedelta(days=90)),
+        ("Personal", 100000.0, 8.5, 15, 8500.0, "Pending", None)
+    ]
 
-        db.session.commit()
-        print("Loan data seeded successfully for Company 3!")
+    print("Seeding loans...")
+    for i, (ltype, amt, rate, tenure, emi, status, d_date) in enumerate(loan_samples):
+        emp_id = employees[i % len(employees)][0]
+        cursor.execute("""
+            INSERT INTO loans (company_id, employee_id, loan_type, amount, interest_rate, tenure_months, emi, status, disbursement_date, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (1, emp_id, ltype, amt, rate, tenure, emi, status, d_date.date().isoformat() if d_date else None, datetime.now().isoformat()))
+
+    conn.commit()
+    conn.close()
+    print("Seeding complete.")
 
 if __name__ == "__main__":
     seed_loans()

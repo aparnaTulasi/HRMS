@@ -197,7 +197,6 @@ def create_admin():
             department=data.get("department") or "N/A",
             designation=data.get("designation") or "N/A",
             pay_grade=data.get("pay_grade") or "N/A",
-            ctc=float(data.get("ctc") or 0.0),
             employment_type=data.get("employment_type"),
             gender=data.get("gender"),
             date_of_birth=parse_date(data.get("date_of_birth")),
@@ -264,25 +263,50 @@ def create_admin():
 def create_user():
     data = request.get_json(force=True)
 
-    # Required fields validation
-    required_fields = ["company_id", "full_name"]
-    missing = [field for field in required_fields if not data.get(field)]
-    if missing:
-        return jsonify({"message": f"Missing required fields: {', '.join(missing)}"}), 400
+    # Debug: Log incoming data keys to help troubleshoot frontend mismatches
+    current_app.logger.info(f"Create User Payload Keys: {list(data.keys())}")
+    print(f"[DEBUG] Create User Data: {data}", flush=True)
 
-    identifier = str(data["company_id"]).strip()
-    company = Company.query.get(int(identifier)) if identifier.isdigit() else \
-              Company.query.filter(func.lower(Company.company_code) == identifier.lower()).first() or \
-              Company.query.filter(func.lower(Company.company_name) == (data.get("company_name") or data.get("name") or "").strip().lower()).first()
+    # Required fields validation
+    required_fields = ["full_name"]
+    missing = [field for field in required_fields if not data.get(field)]
+    
+    # Check all possible company identifier keys
+    company_keys = ["company_id", "companyId", "company_name", "companyName", "company", "name", "company_code"]
+    found_company_key = any(data.get(k) for k in company_keys)
+    
+    if not found_company_key:
+        missing.append("company_id or company_name")
+    if missing:
+        # Diagnostic: Return received keys to help identify frontend field name mismatches
+        return jsonify({
+            "message": f"Missing required fields: {', '.join(missing)}",
+            "received_keys": list(data.keys()),
+            "suggestion": "Check if your frontend matches these keys: company_id, company_name, company, etc."
+        }), 400
+
+    company = None
+    # Try resolving via numeric or code ID first
+    cid = data.get("company_id") or data.get("companyId") or data.get("company_code")
+    # Then try resolving via name
+    cname = data.get("company_name") or data.get("companyName") or data.get("company") or data.get("name")
+    
+    if cid:
+        identifier = str(cid).strip()
+        company = Company.query.get(int(identifier)) if identifier.isdigit() else \
+                  Company.query.filter(func.lower(Company.company_code) == identifier.lower()).first()
+    
+    if not company and cname:
+        company = Company.query.filter(func.lower(Company.company_name) == cname.strip().lower()).first()
 
     if not company:
-        return jsonify({"message": "Company not found"}), 404
+        return jsonify({"message": "Company not found. Please provide a valid company_id or company_name."}), 404
 
     # Authorization Check
-    if g.user.role in ['ADMIN', 'HR'] and company.id != g.user.company_id:
-        return jsonify({"message": f"Permission denied: {g.user.role} can only create users for their own company."}), 403
-
-    user_id = data.get("user_id")
+    user_role = (g.user.role or "").upper()
+    if user_role in ['ADMIN', 'HR'] and company.id != g.user.company_id:
+        return jsonify({"message": f"Permission denied: {user_role} can only create users for their own company."}), 403
+    user_id = data.get("user_id") or data.get("id")
     target_user = None
     
     try:
@@ -290,71 +314,86 @@ def create_user():
             # OPTION 1: Link to existing user account
             target_user = User.query.get(user_id)
             if not target_user:
-                return jsonify({"message": "Selected user account not found"}), 404
-            if target_user.company_id != company.id:
+                return jsonify({"message": f"User account with ID {user_id} not found"}), 404
+            if target_user.company_id != company.id and g.user.role != 'SUPER_ADMIN':
                 return jsonify({"message": "User belongs to a different company"}), 400
-            if target_user.employee_profile:
-                return jsonify({"message": "This user already has an employee profile"}), 400
         else:
-            # OPTION 2: Create new user account
-            company_email = data.get("company_email", "").strip().lower()
+            # OPTION 2: Create new user account or find by email
+            company_email = (data.get("company_email") or data.get("email") or "").strip().lower()
             if not company_email:
                 return jsonify({"message": "Company email is required to create a new user"}), 400
             
-            if User.query.filter_by(email=company_email).first():
-                return jsonify({"message": "User with this email already exists"}), 409
-
-            if data.get("password") and data.get("password") != data.get("confirm_password"):
-                return jsonify({"message": "Passwords do not match"}), 400
-
-            role = (data.get("role") or data.get("employee_type") or "EMPLOYEE").strip().upper()
-            raw_password = data.get('password') or secrets.token_urlsafe(12)
+            target_user = User.query.filter_by(email=company_email).first()
             
-            target_user = User(
-                email=company_email,
-                username=data.get("username"),
-                password=generate_password_hash(raw_password),
-                role=role,
-                company_id=company.id,
-                status="ACTIVE"
-            )
-            db.session.add(target_user)
-            db.session.flush()
+            if not target_user:
+                if data.get("password") and data.get("password") != data.get("confirm_password"):
+                    return jsonify({"message": "Passwords do not match"}), 400
 
-        # Create Employee Record
-        emp = Employee(
-            user_id=target_user.id,
-            company_id=company.id,
-            employee_id=_generate_employee_id(company.id),
-            full_name=data.get("full_name"),
-            personal_email=data.get("personal_email"),
-            company_email=data.get("company_email") or target_user.email,
-            phone_number=data.get("phone_number") or data.get("phone"),
-            department=data.get("department") or "N/A",
-            designation=data.get("designation") or "N/A",
-            branch_id=data.get("branch_id"), # Added Branch ID
-            pay_grade=data.get("pay_grade") or "N/A",
-            ctc=float(data.get("ctc") or 0.0),
-            employment_type=data.get("employment_type") or "Full Time",
-            gender=data.get("gender"),
-            date_of_birth=parse_date(data.get("date_of_birth")),
-            date_of_joining=parse_date(data.get("date_of_joining") or data.get("joining_date")),
-            manager_id=data.get("manager_id"),
-        )
-        db.session.add(emp)
+                role = (data.get("role") or data.get("employee_type") or "EMPLOYEE").strip().upper()
+                raw_password = data.get('password') or secrets.token_urlsafe(10)
+                
+                target_user = User(
+                    email=company_email,
+                    username=data.get("username") or company_email.split('@')[0],
+                    password=generate_password_hash(raw_password),
+                    role=role,
+                    company_id=company.id,
+                    status="ACTIVE"
+                )
+                db.session.add(target_user)
+                db.session.flush()
+
+        # Create or Update Employee Record
+        emp = Employee.query.filter_by(user_id=target_user.id).first()
+        is_new = False
+        if not emp:
+            is_new = True
+            emp = Employee(
+                user_id=target_user.id,
+                company_id=company.id,
+                employee_id=_generate_employee_id(company.id)
+            )
+            db.session.add(emp)
         
-        # Sync email back to user if it changed
+        # Sync simple fields
+        emp.full_name = data.get("full_name") or emp.full_name
+        emp.personal_email = data.get("personal_email") or emp.personal_email
+        emp.company_email = data.get("company_email") or data.get("email") or emp.company_email
+        emp.phone_number = data.get("phone_number") or data.get("phone") or emp.phone_number
+        emp.department = data.get("department") or emp.department or "N/A"
+        emp.designation = data.get("designation") or emp.designation or "N/A"
+        emp.branch_id = data.get("branch_id") or emp.branch_id
+        emp.pay_grade = data.get("pay_grade") or emp.pay_grade or "N/A"
+        emp.employment_type = data.get("employment_type") or emp.employment_type or "Full Time"
+        emp.gender = data.get("gender") or emp.gender
+        emp.date_of_birth = parse_date(data.get("date_of_birth")) or emp.date_of_birth
+        emp.date_of_joining = parse_date(data.get("date_of_joining") or data.get("joining_date")) or emp.date_of_joining
+        emp.manager_id = data.get("manager_id") or emp.manager_id
+
+        # Ignore CTC explicitly
+        if 'ctc' in data:
+            pass
+
+        # Update User Email and Status if needed
         if emp.company_email:
             target_user.email = emp.company_email
-        if data.get("phone_number"):
-            target_user.phone = data.get("phone_number")
+        if data.get("status"):
+            target_user.status = data.get("status").upper()
+        if data.get("role"):
+            target_user.role = data.get("role").upper()
+        
+        raw_password = data.get("password")
+        if raw_password and raw_password == data.get("confirm_password"):
+            from werkzeug.security import generate_password_hash
+            target_user.password = generate_password_hash(raw_password)
             
         db.session.commit()
 
         # Email only if it was a new user creation
         email_sent = False
-        if not user_id:
+        if is_new:
             try:
+                from utils.url_generator import build_web_address, build_common_login_url
                 web_address = build_web_address(company.subdomain)
                 login_url = build_common_login_url(company.subdomain)
                 email_sent = send_login_credentials(
@@ -364,65 +403,25 @@ def create_user():
                     web_address=web_address,
                     reset_url=login_url.replace("/login", "/reset-password"),
                     created_by=g.user.role,
-                    full_name=emp.full_name
+                    full_name=emp.full_name,
+                    password=raw_password
                 )
             except Exception as e:
                 print(f"Error sending email: {e}")
 
         return jsonify({
-            "message": "Employee created successfully",
+            "success": True,
+            "message": "Employee created successfully" if is_new else "Employee updated successfully",
             "employee_id": emp.employee_id,
             "user_id": target_user.id,
             "email_sent": email_sent
-        }), 201
+        }), 201 if is_new else 200
 
     except Exception as e:
         db.session.rollback()
         import traceback
         traceback.print_exc()
         return jsonify({"message": "Error creating user/employee", "error": str(e)}), 500
-
-        # Generate a reset token for the email link
-        reset_token = jwt.encode(
-            {
-                'user_id': new_user.id,
-                'type': 'password_reset',
-                'exp': datetime.utcnow() + timedelta(minutes=60)
-            },
-            current_app.config['SECRET_KEY'],
-            algorithm="HS256"
-        )
-
-        web_address = build_web_address(company.subdomain)
-        login_url = build_common_login_url(company.subdomain)
-        
-        # Construct reset URL with token and email
-        # Generate OTP as a fallback
-        otp = new_user.generate_otp()
-        reset_url = f"{login_url.replace('/login', '/reset-password')}?token={reset_token}&email={company_email}&otp={otp}"
-        
-        email_sent = send_login_credentials(
-            personal_email=personal_email,
-            company_email=company_email,
-            company_name=company.company_name,
-            web_address=web_address,
-            reset_url=login_url.replace("/login", "/reset-password"),
-            created_by="Super Admin",
-            full_name=data.get("full_name") or data.get("name") or "User"
-        )
-
-        return jsonify({
-            "message": f"{role} created successfully",
-            "employee_id": emp.employee_id,
-            "company_email": company_email,
-            "personal_email": personal_email,
-            "email_sent": email_sent
-        }), 201
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"message": "Error creating user", "error": str(e)}), 500
-
 
 # ======================================================
 # ✅ 4) OPTION A & B: Company + Users / Add Users

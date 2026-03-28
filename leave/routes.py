@@ -87,6 +87,8 @@ def serialize(model_instance):
             'from_date': model_instance.from_date.isoformat() if model_instance.from_date else None,
             'to_date': model_instance.to_date.isoformat() if model_instance.to_date else None,
             'reason': model_instance.reason,
+            'is_half_day': getattr(model_instance, 'is_half_day', False),
+            'attachment_url': getattr(model_instance, 'attachment_url', None),
             'status': model_instance.status
         }
     if isinstance(model_instance, LeaveEncashment):
@@ -932,6 +934,59 @@ def validate_leave():
         "requested_days": requested_days
     }), 200
 
+@leave_bp.route('/calculate-days', methods=['POST'])
+@token_required
+def calculate_leave_days():
+    data = request.get_json() or {}
+    from_date_str = data.get('from_date')
+    to_date_str = data.get('to_date')
+    is_half_day = data.get('is_half_day', False)
+    leave_type_id = data.get('leave_type_id')
+
+    if not from_date_str or not to_date_str or not leave_type_id:
+        return jsonify({'message': 'Missing required fields: from_date, to_date, leave_type_id'}), 400
+
+    from_date = _parse_date(from_date_str)
+    to_date = _parse_date(to_date_str)
+
+    if not from_date or not to_date:
+        return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
+
+    if to_date < from_date:
+        return jsonify({'message': 'to_date cannot be earlier than from_date'}), 400
+
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        return jsonify({'message': 'Employee profile not found'}), 404
+
+    mapping = select_policy_mapping(emp.company_id, emp, leave_type_id)
+    if not mapping:
+        # Default computation if no policy found
+        days = (to_date - from_date).days + 1
+        if is_half_day:
+            days = 0.5 if days == 1 else days - 0.5 # Basic logic
+        return jsonify({'requested_days': float(days)}), 200
+
+    from .services import compute_units
+    units, meta = compute_units(emp.company_id, emp, mapping, from_date, to_date)
+    
+    if is_half_day:
+        # If it's a single day and half-day, it's 0.5
+        # If multiple days, we assume only the last day or some part is half? 
+        # Usually "Half Day" toggle in UI means the whole request is for half days or the single day is half.
+        # If from_date == to_date and is_half_day, units = 0.5
+        if from_date == to_date:
+            units = 0.5
+        else:
+            # If multi-day half-day, it depends on policy, but usually it's used for single day.
+            # Let's stick to 0.5 for single day for now as per common HRMS logic.
+            units = units - 0.5 if units > 0 else 0
+
+    return jsonify({
+        'requested_days': units,
+        'meta': meta
+    }), 200
+
 @leave_bp.route('/ledger/manual', methods=['POST'])
 @token_required
 @role_required(['ADMIN', 'HR'])
@@ -1228,15 +1283,33 @@ def get_my_leaves():
     # Join with LeaveType to get the name for a richer response
     leaves_with_type = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
         .add_columns(LeaveType.name.label("leave_type_name"))\
-        .order_by(LeaveRequest.from_date.desc()).all()
+        .order_by(LeaveRequest.created_at.desc()).all()
     
     results = []
     for leave_request, leave_type_name in leaves_with_type:
         data = serialize(leave_request)
         data['leave_type_name'] = leave_type_name
+        # Add human-readable applied date
+        data['applied_on'] = leave_request.created_at.strftime('%b %d, %Y') if leave_request.created_at else "N/A"
         results.append(data)
 
-    return jsonify(results), 200
+    # Get current balances
+    balances = LeaveBalance.query.filter_by(employee_id=emp.id).all()
+    balance_list = []
+    for b in balances:
+        lt = LeaveType.query.get(b.leave_type_id)
+        if lt and lt.is_active:
+            balance_list.append({
+                "leave_type_id": b.leave_type_id,
+                "leave_type_name": lt.name,
+                "leave_type_code": lt.code,
+                "balance": b.balance
+            })
+
+    return jsonify({
+        "leaves": results,
+        "balances": balance_list
+    }), 200
 
 @leave_bp.route('/apply', methods=['POST'])
 @token_required
@@ -1259,11 +1332,13 @@ def apply_leave():
         from_date=_parse_date(data['from_date']), 
         to_date=_parse_date(data['to_date']),
         reason=data.get('reason'),
+        is_half_day=data.get('is_half_day', False),
+        attachment_url=data.get('attachment_url'),
         status=data.get('status', 'Pending')
     )
     db.session.add(new_leave)
     db.session.commit()
-    return jsonify({'message': 'Leave application submitted'}), 201
+    return jsonify({'message': 'Leave application submitted', 'id': new_leave.id}), 201
 
 @leave_bp.route('/<int:id>', methods=['GET', 'PUT'])
 @token_required

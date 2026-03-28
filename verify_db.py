@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def list_all_tables():
+def verify_schema():
     conn = mysql.connector.connect(
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
@@ -13,12 +13,18 @@ def list_all_tables():
         database=os.getenv("DB_NAME")
     )
     cursor = conn.cursor()
-    cursor.execute("SHOW TABLES")
-    print("Tables in hrms_db:")
-    for table in cursor.fetchall():
-        print(table)
+    print("Columns in leave_types:")
+    cursor.execute("DESCRIBE leave_types")
+    for col in cursor.fetchall():
+        print(col)
+    
+    print("\nColumns in leave_requests:")
+    cursor.execute("DESCRIBE leave_requests")
+    for col in cursor.fetchall():
+        print(col)
+        
     cursor.close()
     conn.close()
 
 if __name__ == "__main__":
-    list_all_tables()
+    verify_schema()

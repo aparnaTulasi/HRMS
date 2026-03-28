@@ -23,6 +23,8 @@ class Employee(db.Model):
     ctc = db.Column(db.Float, default=0.0)
     bio = db.Column(db.Text)
     emergency_contact = db.Column(db.String(100))
+    onboarding_status = db.Column(db.String(50), default='Pending') # Pending, In Progress, Document Verification, Completed
+    onboarding_completed_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

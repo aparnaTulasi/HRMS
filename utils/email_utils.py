@@ -91,29 +91,20 @@ def send_account_created_alert(personal_email: str, company_name: str, created_b
     return _send_plain_email(personal_email, subject, body)
 
 def send_login_credentials(personal_email: str, company_email: str, 
-                           company_name: str, web_address: str, reset_url: str, created_by: str, full_name: str = "User") -> bool:
-    subject = "Welcome to HRMS - Your Account is Ready"
+                           company_name: str, web_address: str, reset_url: str, 
+                           created_by: str, full_name: str = "User", password: str = None) -> bool:
+    subject = "Login Details"
     body = (
-        f"Dear {full_name},\n\n"
-        "Welcome to **HRMS**!\n\n"
-        f"Your account has been successfully created by the {created_by}.\n"
-        "You can now access the HRMS portal using the details below.\n\n"
-        "---\n\n"
-        "**Login Information**\n\n"
-        f"🌐 Web Portal: {web_address}\n"
-        f"👤 Username: {company_email}\n\n"
-        "🔒 For security reasons, please set your password using the link below.\n\n"
-        "👉 **Set Your Password:**\n"
-        f"{reset_url}\n\n"
-        "---\n\n"
-        "**Important Security Note**\n\n"
-        "* Do not share your login credentials with anyone.\n"
-        "* Change your password after first login.\n\n"
-        "If you face any issues, please contact HRMS Support.\n\n"
-        "Regards,\n"
-        "**HRMS Team**\n"
-        "HR Management System\n"
-        "support@hrms.com"
+        f"Hello,\n\n"
+        f"Your account has been created by {created_by}.\n\n"
+        f"Login Details:\n"
+        f"Web Address: {web_address}\n"
+        f"Username: {company_email}\n"
+        f"Password: {password if password else 'Contact Admin'}\n\n"
+        f"👉 Click here to login:\n"
+        f"{web_address}\n\n"
+        f"Regards,\n"
+        f"{company_name.upper()}"
     )
     return _send_plain_email(personal_email, subject, body)
 

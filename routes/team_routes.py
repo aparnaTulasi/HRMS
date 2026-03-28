@@ -5,7 +5,7 @@ from models.attendance import Attendance
 from models.squad import Squad
 from models.squad_member import SquadMember
 from models.user import User
-from utils.decorators import token_required
+from utils.decorators import token_required, role_required
 from datetime import date, datetime, timedelta
 from sqlalchemy import func
 import random
@@ -14,6 +14,7 @@ team_bp = Blueprint('team', __name__)
 
 @team_bp.route('/api/superadmin/team/dashboard', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_team_dashboard():
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -48,6 +49,7 @@ def get_team_dashboard():
 
 @team_bp.route('/api/superadmin/team/superstars', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_team_superstars():
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -75,6 +77,7 @@ def get_team_superstars():
 
 @team_bp.route('/api/superadmin/team/resilience', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_team_resilience():
     # Mock data for the graph as requested (inspired by "graph database" concept)
     return jsonify({
@@ -92,6 +95,7 @@ def get_team_resilience():
 
 @team_bp.route('/api/superadmin/squads', methods=['GET'])
 @token_required
+@role_required(['HR'])
 def get_squads():
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -116,8 +120,50 @@ def get_squads():
         }
     })
 
+@team_bp.route('/api/team/squads/form-options', methods=['GET'])
+@token_required
+@role_required(['HR'])
+def get_squad_form_options():
+    # In a real app, these could come from a Master table. 
+    # For now, providing based on the UI requirements.
+    return jsonify({
+        "success": True,
+        "data": {
+            "departments": ["IT Department", "Non-IT Department"],
+            "squad_types": ["General Team", "Project Wise"]
+        }
+    })
+
+@team_bp.route('/api/team/squads/employees', methods=['GET'])
+@token_required
+@role_required(['HR'])
+def get_squad_employees():
+    company_id = g.user.company_id
+    search = request.args.get('search', '')
+    
+    query = Employee.query.filter_by(company_id=company_id)
+    if search:
+        query = query.filter(Employee.full_name.ilike(f"%{search}%"))
+        
+    employees = query.all()
+    data = []
+    for emp in employees:
+        user = User.query.get(emp.user_id)
+        data.append({
+            "id": emp.id,
+            "name": emp.full_name,
+            "designation": emp.designation,
+            "image": user.profile_pic if user and hasattr(user, 'profile_pic') else None
+        })
+        
+    return jsonify({
+        "success": True,
+        "data": data
+    })
+
 @team_bp.route('/api/superadmin/squads', methods=['POST'])
 @token_required
+@role_required(['HR'])
 def build_squad():
     data = request.get_json()
     
@@ -129,7 +175,8 @@ def build_squad():
         company_id=company_id,
         squad_name=data.get('squad_name'),
         project_name=data.get('project_name'),
-        squad_type=data.get('squad_type', 'IT'),
+        department=data.get('department', 'IT Department'),
+        squad_type=data.get('squad_type', 'General Team'),
         status='Active'
     )
     
@@ -137,7 +184,10 @@ def build_squad():
     db.session.flush()
     
     # Add members if provided
-    members = data.get('members', [])
+    members = data.get('members', []) # Expected list of {"employee_id": 1, "role": "Lead"} 
+    # Or just member_ids list
+    member_ids = data.get('member_ids', [])
+    
     for m in members:
         member = SquadMember(
             squad_id=new_squad.id,
@@ -145,6 +195,16 @@ def build_squad():
             role=m.get('role', 'Member')
         )
         db.session.add(member)
+        
+    for eid in member_ids:
+        # Check if already added via members list
+        if not any(m.get('employee_id') == eid for m in members):
+            member = SquadMember(
+                squad_id=new_squad.id,
+                employee_id=eid,
+                role='Member'
+            )
+            db.session.add(member)
         
     db.session.commit()
     

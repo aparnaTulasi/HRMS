@@ -29,6 +29,13 @@ class LetterTemplate(db.Model):
 
     letter_type = db.Column(db.String(40), nullable=False, index=True)  # OFFER/APPOINTMENT/INCREMENT/RELIEVING/PERFORMANCE
     title = db.Column(db.String(120), nullable=False)                  # UI card title
+    category = db.Column(db.String(50), nullable=True)                 # Recruitment, Onboarding, Performance, Exit, General
+    
+    resource_url = db.Column(db.String(255), nullable=True)
+    blog_link = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(20), default="Active")                # Active, Draft
+    usage_count = db.Column(db.Integer, default=0)
+
     body_html = db.Column(db.Text, nullable=False)                     # template with {{var}}
 
     is_active = db.Column(db.Boolean, default=True)
@@ -190,6 +197,81 @@ class HRDocument(db.Model):
     title = db.Column(db.String(150), nullable=False)
     category = db.Column(db.String(100), nullable=True) # Policy, Handbook, Form
     file_path = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.String(20), nullable=True)
+    file_type = db.Column(db.String(20), nullable=True)
 
     created_by = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class LetterApprovalWorkflow(db.Model):
+    __tablename__ = "letter_approval_workflows"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+    
+    name = db.Column(db.String(150), nullable=False)
+    letter_type = db.Column(db.String(40), nullable=False)
+    status = db.Column(db.String(20), default="Active")  # Active, Draft
+    is_active = db.Column(db.Boolean, default=True)      # Soft delete
+
+    created_by = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class LetterApprovalWorkflowLevel(db.Model):
+    __tablename__ = "letter_approval_workflow_levels"
+
+    id = db.Column(db.Integer, primary_key=True)
+    workflow_id = db.Column(db.Integer, db.ForeignKey("letter_approval_workflows.id"), nullable=False)
+    
+    step_no = db.Column(db.Integer, nullable=False)
+    role = db.Column(db.String(50), nullable=False)    # HR Manager, Dept Head, CEO, etc.
+    user_id = db.Column(db.Integer, nullable=True)      # Specific user if any
+
+    workflow = db.relationship("LetterApprovalWorkflow", backref=db.backref("levels", cascade="all, delete-orphan"))
+
+class LetterVariable(db.Model):
+    __tablename__ = "letter_variables"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+    
+    name = db.Column(db.String(50), nullable=False)        # variable name like {{designation}}
+    description = db.Column(db.String(255), nullable=True) # e.g. "Employee's Job Title"
+    source = db.Column(db.String(20), default="System")    # System, Custom
+    is_active = db.Column(db.Boolean, default=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class EsignRequest(db.Model):
+    __tablename__ = "esign_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True)
+    
+    employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=False)
+    letter_type = db.Column(db.String(50), nullable=False)
+    sent_date = db.Column(db.Date, default=date.today)
+    due_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default="Pending") # Pending, Signed, Overdue, Declined
+    
+    request_id = db.Column(db.Integer, db.ForeignKey("letter_requests.id"), nullable=True)
+    
+    created_by = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    employee = db.relationship("Employee", foreign_keys=[employee_id])
+
+class EsignSettings(db.Model):
+    __tablename__ = "esign_settings"
+
+    id = db.Column(db.Integer, primary_key=True)
+    company_id = db.Column(db.Integer, nullable=False, index=True, unique=True)
+    
+    otp_enabled = db.Column(db.Boolean, default=True)
+    selfie_enabled = db.Column(db.Boolean, default=False)
+    aadhaar_enabled = db.Column(db.Boolean, default=False)
+    reminders_enabled = db.Column(db.Boolean, default=True)
+
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

@@ -10,6 +10,7 @@ from flask import Blueprint, request, jsonify, g, current_app, send_file
 from werkzeug.utils import secure_filename
 
 from models import db
+from sqlalchemy import func
 from utils.decorators import token_required, role_required
 
 # NOTE: Make sure these models exist in models/hr_documents.py
@@ -19,8 +20,16 @@ from models.hr_documents import (
     LetterRequest,
     CertificateIssue,
     WFHRequest,
-    HRDocument
+    HRDocument,
+    LetterApprovalWorkflow,
+    LetterApprovalWorkflowLevel,
+    LetterApprovalStep,
+    LetterVariable,
+    EsignRequest,
+    EsignSettings
 )
+from models.employee_documents import EmployeeDocument
+from models.employee import Employee
 
 hr_docs_bp = Blueprint("hr_docs_bp", __name__)
 
@@ -215,38 +224,105 @@ def letters_cards():
     ])
 
 
-@hr_docs_bp.post("/letters/templates/seed")
+@hr_docs_bp.get("/letters/templates/stats")
 @token_required
 @role_required(["HR", "ADMIN", "SUPER_ADMIN"])
-def letters_seed_templates():
-    err = _hr_only()
-    if err: return err
+def letters_template_stats():
+    total = LetterTemplate.query.filter_by(company_id=_company_id(), is_active=True).count()
+    active = LetterTemplate.query.filter_by(company_id=_company_id(), is_active=True, status="Active").count()
+    draft = LetterTemplate.query.filter_by(company_id=_company_id(), is_active=True, status="Draft").count()
+    
+    # Sum of usage_count
+    from sqlalchemy import func
+    total_usage = db.session.query(func.sum(LetterTemplate.usage_count)).filter_by(company_id=_company_id(), is_active=True).scalar() or 0
+    
+    return _json_ok({
+        "total_templates": total,
+        "active_templates": active,
+        "draft_templates": draft,
+        "total_usage": total_usage
+    })
 
-    defaults = [
-        ("OFFER", "Offer Letter", "<h2>Offer Letter</h2><p>Dear {{employee_name}},</p><p>We offer you {{designation}} with CTC {{ctc}}.</p>"),
-        ("APPOINTMENT", "Appointment Letter", "<h2>Appointment Letter</h2><p>Welcome {{employee_name}} as {{designation}}.</p>"),
-        ("INCREMENT", "Increment Letter", "<h2>Increment Letter</h2><p>Your new CTC is {{ctc}} effective {{effective_date}}.</p>"),
-        ("RELIEVING", "Relieving Letter", "<h2>Relieving Letter</h2><p>{{employee_name}} relieved on {{last_working_day}}.</p>"),
-        ("PERFORMANCE", "Performance Review", "<h2>Performance Review</h2><p>{{employee_name}} rating: {{rating}}.</p>"),
-    ]
+@hr_docs_bp.get("/letters/templates/list")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def letters_template_list():
+    items = LetterTemplate.query.filter_by(company_id=_company_id(), is_active=True).all()
+    data = [{
+        "id": x.id,
+        "template_name": x.title,
+        "category": x.category,
+        "last_modified": x.updated_at.strftime('%Y-%m-%d'),
+        "status": x.status,
+        "usage": x.usage_count,
+        "resource_url": x.resource_url,
+        "blog_link": x.blog_link
+    } for x in items]
+    return _json_ok(data)
 
-    created = 0
-    for t, title, body in defaults:
-        exists = LetterTemplate.query.filter_by(company_id=_company_id(), letter_type=t, is_active=True).first()
-        if not exists:
-            db.session.add(LetterTemplate(
-                company_id=_company_id(),
-                letter_type=t,
-                title=title,
-                body_html=body,
-                is_active=True,
-                version_no=1,
-                created_by=_user_id()
-            ))
-            created += 1
+@hr_docs_bp.get("/letters/templates/categories")
+@token_required
+def letters_template_categories():
+    return _json_ok(["Recruitment", "Onboarding", "Performance", "Exit", "General"])
 
+@hr_docs_bp.post("/letters/templates/add")
+@token_required
+@role_required(["HR"])
+def letters_template_add():
+    payload = request.get_json()
+    if not payload.get("template_name") or not payload.get("content"):
+        return jsonify({"success": False, "message": "Name and Content required"}), 400
+        
+    obj = LetterTemplate(
+        company_id=_company_id(),
+        letter_type=payload.get("category", "General").upper(), # Mapping category to letter_type for backward compat
+        title=payload["template_name"],
+        category=payload.get("category", "General"),
+        body_html=payload["content"],
+        resource_url=payload.get("resource_url"),
+        blog_link=payload.get("blog_link"),
+        status=payload.get("status", "Active"),
+        created_by=_user_id()
+    )
+    db.session.add(obj)
     db.session.commit()
-    return _json_ok({"created": created}, "Templates seeded")
+    return _json_ok({"id": obj.id}, "Template added")
+
+@hr_docs_bp.put("/letters/templates/<int:tid>")
+@token_required
+@role_required(["HR"])
+def letters_template_update(tid):
+    obj = LetterTemplate.query.filter_by(id=tid, company_id=_company_id()).first()
+    if not obj:
+        return jsonify({"success": False, "message": "Not found"}), 404
+        
+    payload = request.get_json()
+    if "template_name" in payload: obj.title = payload["template_name"]
+    if "category" in payload: 
+        obj.category = payload["category"]
+        obj.letter_type = payload["category"].upper()
+    if "content" in payload: obj.body_html = payload["content"]
+    if "resource_url" in payload: obj.resource_url = payload["resource_url"]
+    if "blog_link" in payload: obj.blog_link = payload["blog_link"]
+    if "status" in payload: obj.status = payload["status"]
+    
+    db.session.commit()
+    return _json_ok({"id": obj.id}, "Template updated")
+
+@hr_docs_bp.delete("/letters/templates/<int:tid>")
+@token_required
+@role_required(["HR"])
+def letters_template_delete(tid):
+    obj = LetterTemplate.query.filter_by(id=tid, company_id=_company_id()).first()
+    if not obj:
+        return jsonify({"success": False, "message": "Not found"}), 404
+        
+    # Soft delete
+    obj.is_active = False
+    db.session.commit()
+    return _json_ok({"id": tid}, "Template deleted")
+
+@hr_docs_bp.post("/letters/templates/seed")
 
 
 @hr_docs_bp.post("/letters/generate")
@@ -281,6 +357,8 @@ def letters_generate():
     if not letter_type or not employee_name or not employee_email or not letter_date_str:
         return jsonify({"success": False, "message": "LetterType, EmployeeName, EmployeeEmail, Date required"}), 400
 
+    letter_type_str = str(letter_type)
+
     tmpl = LetterTemplate.query.filter_by(company_id=_company_id(), letter_type=letter_type, is_active=True).first()
     if not tmpl:
         return jsonify({"success": False, "message": "No active template for this LetterType"}), 400
@@ -302,10 +380,9 @@ def letters_generate():
         template_id=tmpl.id,
         employee_name=employee_name,
         employee_email=employee_email,
-        letter_date=date.fromisoformat(letter_date_str),
+        letter_date=date.fromisoformat(str(letter_date_str)),
         template_option=template_option,
         send_email_copy=send_copy,
-        status="GENERATED",
         payload=context,
         current_version=1,
         created_by=_user_id()
@@ -313,17 +390,39 @@ def letters_generate():
     db.session.add(req)
     db.session.flush()
 
+    # Check for Approval Workflow
+    workflow = LetterApprovalWorkflow.query.filter_by(
+        company_id=_company_id(), 
+        letter_type=letter_type, 
+        is_active=True, 
+        status="Active"
+    ).first()
+    
+    if workflow:
+        req.status = "IN_REVIEW"
+        # Create approval steps
+        for level in sorted(workflow.levels, key=lambda x: x.step_no):
+            step = LetterApprovalStep(
+                request_id=req.id,
+                step_no=level.step_no,
+                approver_role=level.role,
+                status="PENDING" if level.step_no == 1 else "AWAITING_PREVIOUS"
+            )
+            db.session.add(step)
+    else:
+        req.status = "GENERATED"
+
     # Generate file
     rendered = _render_template(tmpl.body_html, context)
-    file_path = _save_text_as_file(rendered, f"letter_{letter_type.lower()}_{req.id}_v1")
+    file_path = _save_text_as_file(rendered, f"letter_{letter_type_str.lower()}_{req.id}_v1")
     req.pdf_path = file_path
 
-    # Send email if checked
-    email_status = "Not Sent"
-    if send_copy:
+    # Send email only if already approved or no workflow
+    email_status = "Not Sent (Awaiting Approval)" if workflow else "Not Sent"
+    if not workflow and send_copy:
         subject = f"{tmpl.title} - {employee_name}"
         body = f"Hello {employee_name},\n\nPlease find attached your {tmpl.title}.\nDate: {letter_date_str}\n\nRegards,\nHR Team"
-        sent = _send_email_with_attachment(employee_email, subject, body, file_path)
+        sent = _send_email_with_attachment(str(employee_email), subject, body, file_path)
         if sent:
             req.status = "SENT"
             email_status = "Sent"
@@ -349,6 +448,528 @@ def letters_generate():
         "DownloadUrlAbsolute": abs_download
     }, "Letter generated")
 
+
+# =========================================================
+# TAB 3: APPROVALS
+# =========================================================
+@hr_docs_bp.get("/letters/approval/stats")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def letters_approval_stats():
+    pending = LetterApprovalStep.query.filter_by(status="PENDING").count()
+    active_workflows = LetterApprovalWorkflow.query.filter_by(company_id=_company_id(), is_active=True, status="Active").count()
+    
+    # Simple count for this month
+    current_month = datetime.utcnow().month
+    approved_this_month = LetterApprovalStep.query.filter(
+        LetterApprovalStep.status == "APPROVED",
+        db.func.extract('month', LetterApprovalStep.action_at) == current_month
+    ).count()
+    rejected = LetterApprovalStep.query.filter_by(status="REJECTED").count()
+    
+    return _json_ok({
+        "pending_approvals": pending,
+        "active_workflows": active_workflows,
+        "approved_this_month": approved_this_month,
+        "rejected": rejected
+    })
+
+@hr_docs_bp.get("/letters/approval/pending")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN", "MANAGER"])
+def letters_approval_pending():
+    # Filter by user's role or specific user_id
+    # For now, show all pending for simplicity or filter by role
+    user_role = g.user.role
+    steps = LetterApprovalStep.query.filter_by(status="PENDING", approver_role=user_role).all()
+    
+    data = []
+    for s in steps:
+        req = LetterRequest.query.get(s.request_id)
+        if not req or req.company_id != _company_id(): continue
+        
+        # Calculate level progress
+        total_steps = LetterApprovalStep.query.filter_by(request_id=req.id).count()
+        current_level_no = s.step_no
+        
+        data.append({
+            "id": s.id,
+            "letter_id": f"L{req.id:03}",
+            "employee": req.employee_name,
+            "letter_type": req.letter_type,
+            "requested_by": "HR", # Should be from req.created_by
+            "date": req.letter_date.isoformat() if req.letter_date else None,
+            "approval_level": f"Level {current_level_no}/{total_steps}",
+            "request_id": req.id
+        })
+    return _json_ok(data)
+
+@hr_docs_bp.post("/letters/approval/<int:step_id>/action")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN", "MANAGER"])
+def letters_approval_action(step_id):
+    step = LetterApprovalStep.query.get_or_404(step_id)
+    payload = request.get_json()
+    action = payload.get("action") # APPROVE, REJECT
+    comments = payload.get("comments")
+    
+    if action not in ["APPROVE", "REJECT"]:
+        return jsonify({"success": False, "message": "Invalid action"}), 400
+        
+    step.status = "APPROVED" if action == "APPROVE" else "REJECTED"
+    step.action_by = _user_id()
+    step.action_at = datetime.utcnow()
+    step.comments = comments
+    
+    req = LetterRequest.query.get(step.request_id)
+    
+    if action == "APPROVE":
+        # Check if there's a next step
+        next_step = LetterApprovalStep.query.filter_by(
+            request_id=step.request_id, 
+            step_no=step.step_no + 1
+        ).first()
+        if not next_step:
+            req.status = "APPROVED"
+        else:
+            next_step.status = "PENDING"
+    else:
+        req.status = "REJECTED"
+        # Optional: set all subsequent steps to REJECTED or CANCELLED
+        LetterApprovalStep.query.filter(
+            LetterApprovalStep.request_id == step.request_id,
+            LetterApprovalStep.step_no > step.step_no
+        ).update({"status": "REJECTED"})
+        
+    db.session.commit()
+    return _json_ok({"status": step.status}, f"Letter {action.lower()}d")
+
+# Workflow CRUD
+@hr_docs_bp.get("/letters/approval/workflows")
+@token_required
+@role_required(["HR"])
+def letters_workflow_list():
+    workflows = LetterApprovalWorkflow.query.filter_by(company_id=_company_id(), is_active=True).all()
+    data = []
+    for w in workflows:
+        levels = [{"level": l.step_no, "role": l.role} for l in sorted(w.levels, key=lambda x: x.step_no)]
+        data.append({
+            "id": w.id,
+            "name": w.name,
+            "letter_type": w.letter_type,
+            "status": w.status,
+            "levels": levels
+        })
+    return _json_ok(data)
+
+@hr_docs_bp.post("/letters/approval/workflows")
+@token_required
+@role_required(["HR"])
+def letters_workflow_add():
+    payload = request.get_json()
+    if not payload.get("name") or not payload.get("letter_type"):
+        return jsonify({"success": False, "message": "Name and Letter Type required"}), 400
+        
+    w = LetterApprovalWorkflow(
+        company_id=_company_id(),
+        name=payload["name"],
+        letter_type=payload["letter_type"],
+        status=payload.get("status", "Active"),
+        created_by=_user_id()
+    )
+    db.session.add(w)
+    db.session.commit()
+    return _json_ok({"id": w.id}, "Workflow created")
+
+@hr_docs_bp.post("/letters/approval/workflows/<int:wid>/levels")
+@token_required
+@role_required(["HR"])
+def letters_workflow_add_level(wid):
+    w = LetterApprovalWorkflow.query.filter_by(id=wid, company_id=_company_id()).first_or_404()
+    payload = request.get_json()
+    
+    level = LetterApprovalWorkflowLevel(
+        workflow_id=w.id,
+        step_no=payload["step_no"],
+        role=payload["role"],
+        user_id=payload.get("user_id")
+    )
+    db.session.add(level)
+    db.session.commit()
+    return _json_ok({"id": level.id}, "Level added")
+
+# =========================================================
+# TAB: E-SIGN
+# =========================================================
+@hr_docs_bp.get("/esign/summary")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def esign_summary():
+    total_sent = EsignRequest.query.filter_by(company_id=_company_id()).count()
+    signed = EsignRequest.query.filter_by(company_id=_company_id(), status="Signed").count()
+    pending = EsignRequest.query.filter_by(company_id=_company_id(), status="Pending").count()
+    overdue = EsignRequest.query.filter_by(company_id=_company_id(), status="Overdue").count()
+    
+    return _json_ok({
+        "total_sent": total_sent,
+        "signed": signed,
+        "pending": pending,
+        "overdue": overdue
+    })
+
+@hr_docs_bp.get("/esign/requests")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def esign_requests():
+    status_filter = request.args.get("status")
+    query = EsignRequest.query.filter_by(company_id=_company_id())
+    
+    if status_filter and status_filter != "All Status":
+        query = query.filter_by(status=status_filter)
+        
+    items = query.order_by(EsignRequest.sent_date.desc()).all()
+    
+    data = []
+    for x in items:
+        data.append({
+            "id": f"ES-{x.id:03}",
+            "employee": x.employee.full_name if x.employee else "Unknown",
+            "letter_type": x.letter_type,
+            "sent_date": x.sent_date.isoformat() if x.sent_date else None,
+            "due_date": x.due_date.isoformat() if x.due_date else None,
+            "status": x.status,
+            "request_id": x.request_id
+        })
+    return _json_ok(data)
+
+@hr_docs_bp.post("/esign/requests")
+@token_required
+@role_required(["HR"])
+def esign_request_create():
+    payload = request.get_json()
+    emp_name_or_id = payload.get("employee") # Search was done on frontend or via search helper
+    letter_type = payload.get("letter_type")
+    deadline_str = payload.get("deadline")
+    
+    if not letter_type or not deadline_str:
+        return jsonify({"success": False, "message": "Letter Type and Deadline required"}), 400
+        
+    # Find employee
+    employee = None
+    if payload.get("employee_id"):
+        employee = Employee.query.get(payload["employee_id"])
+    
+    if not employee:
+        return jsonify({"success": False, "message": "Employee not found"}), 404
+        
+    req = EsignRequest(
+        company_id=_company_id(),
+        employee_id=employee.id,
+        letter_type=letter_type,
+        due_date=date.fromisoformat(deadline_str),
+        status="Pending",
+        created_by=_user_id()
+    )
+    db.session.add(req)
+    db.session.commit()
+    return _json_ok({"id": req.id}, "E-Sign request sent")
+
+@hr_docs_bp.get("/esign/settings")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def esign_settings_get():
+    s = EsignSettings.query.filter_by(company_id=_company_id()).first()
+    if not s:
+        # Default settings if none exist
+        s = EsignSettings(company_id=_company_id())
+        db.session.add(s)
+        db.session.commit()
+        
+    return _json_ok({
+        "otp_enabled": s.otp_enabled,
+        "selfie_enabled": s.selfie_enabled,
+        "aadhaar_enabled": s.aadhaar_enabled,
+        "reminders_enabled": s.reminders_enabled
+    })
+
+@hr_docs_bp.put("/esign/settings")
+@token_required
+@role_required(["HR"])
+def esign_settings_update():
+    payload = request.get_json()
+    s = EsignSettings.query.filter_by(company_id=_company_id()).first()
+    if not s:
+        s = EsignSettings(company_id=_company_id())
+        db.session.add(s)
+        
+    if "otp_enabled" in payload: s.otp_enabled = bool(payload["otp_enabled"])
+    if "selfie_enabled" in payload: s.selfie_enabled = bool(payload["selfie_enabled"])
+    if "aadhaar_enabled" in payload: s.aadhaar_enabled = bool(payload["aadhaar_enabled"])
+    if "reminders_enabled" in payload: s.reminders_enabled = bool(payload["reminders_enabled"])
+    
+    db.session.commit()
+    return _json_ok(None, "Settings updated")
+
+@hr_docs_bp.post("/esign/requests/<int:rid>/resend")
+@token_required
+@role_required(["HR"])
+def esign_request_resend(rid):
+    req = EsignRequest.query.filter_by(id=rid, company_id=_company_id()).first()
+    if not req:
+        return jsonify({"success": False, "message": "Request not found"}), 404
+        
+    req.sent_date = date.today()
+    req.status = "Pending"
+    db.session.commit()
+    return _json_ok(None, "E-Sign request resent")
+
+@hr_docs_bp.get("/esign/requests/<int:rid>")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def esign_request_get(rid):
+    x = EsignRequest.query.filter_by(id=rid, company_id=_company_id()).first()
+    if not x:
+        return jsonify({"success": False, "message": "Not found"}), 404
+        
+    return _json_ok({
+        "id": f"ES-{x.id:03}",
+        "employee": x.employee.full_name if x.employee else "Unknown",
+        "letter_type": x.letter_type,
+        "sent_date": x.sent_date.isoformat() if x.sent_date else None,
+        "due_date": x.due_date.isoformat() if x.due_date else None,
+        "status": x.status,
+        "request_id": x.request_id
+    })
+
+# =========================================================
+# TAB 2: VARIABLES
+# =========================================================
+@hr_docs_bp.get("/letters/variables/list")
+@token_required
+def letters_variable_list():
+    items = LetterVariable.query.filter_by(company_id=_company_id(), is_active=True).all()
+    data = [{
+        "id": x.id,
+        "name": x.name,
+        "description": x.description,
+        "source": x.source
+    } for x in items]
+    return _json_ok(data)
+
+@hr_docs_bp.post("/letters/variables/add")
+@token_required
+@role_required(["HR"])
+def letters_variable_add():
+    payload = request.get_json()
+    if not payload.get("name"):
+        return jsonify({"success": False, "message": "Variable name required"}), 400
+        
+    v = LetterVariable(
+        company_id=_company_id(),
+        name=payload["name"],
+        description=payload.get("description"),
+        source="Custom",
+        is_active=True
+    )
+    db.session.add(v)
+    db.session.commit()
+    return _json_ok({"id": v.id}, "Variable added")
+
+@hr_docs_bp.delete("/letters/variables/<int:vid>")
+@token_required
+@role_required(["HR"])
+def letters_variable_delete(vid):
+    v = LetterVariable.query.filter_by(id=vid, company_id=_company_id()).first_or_404()
+    if v.source == "System":
+        return jsonify({"success": False, "message": "Cannot delete system variables"}), 403
+        
+    v.is_active = False
+    db.session.commit()
+    return _json_ok({"id": vid}, "Variable deleted")
+
+@hr_docs_bp.post("/letters/variables/seed")
+@token_required
+@role_required(["HR"])
+def letters_variable_seed():
+    defaults = [
+        ("employee_name", "Full Name of the Employee"),
+        ("designation", "Job Title / Designation"),
+        ("joining_date", "Date of joining"),
+        ("ctc", "Annual CTC amount"),
+        ("company_name", "Name of the Company"),
+        ("department", "Department name"),
+        ("effective_date", "The date from which changes apply"),
+        ("last_working_day", "The last day of employment")
+    ]
+    
+    created = 0
+    for name, desc in defaults:
+        exists = LetterVariable.query.filter_by(company_id=_company_id(), name=name, is_active=True).first()
+        if not exists:
+            db.session.add(LetterVariable(
+                company_id=_company_id(),
+                name=name,
+                description=desc,
+                source="System"
+            ))
+            created += 1
+    db.session.commit()
+    return _json_ok({"created": created}, "System variables seeded")
+
+# =========================================================
+# DOCUMENTS CENTER
+# =========================================================
+
+# TAB 1: COMPANY POLICIES
+@hr_docs_bp.get("/policies/list")
+@token_required
+def policies_list():
+    items = HRDocument.query.filter_by(company_id=_company_id()).all()
+    data = [{
+        "id": x.id,
+        "document_name": x.title,
+        "category": x.category,
+        "type": x.file_type or "PDF",
+        "size": x.file_size or "0.0 MB",
+        "upload_date": x.created_at.strftime('%b %d, %Y')
+    } for x in items]
+    return _json_ok(data)
+
+@hr_docs_bp.post("/policies/upload")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def policies_upload():
+    if 'file' not in request.files:
+        return jsonify({"success": False, "message": "No file part"}), 400
+    file = request.files['file']
+    title = request.form.get("title")
+    category = request.form.get("category", "Policy")
+    
+    if not file or not title:
+        return jsonify({"success": False, "message": "File and Title required"}), 400
+        
+    filename = secure_filename(file.filename)
+    # Ensure uploads directory exists
+    upload_dir = os.path.join(current_app.root_path, 'uploads', 'policies')
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    file_path = os.path.join(upload_dir, f"{datetime.utcnow().timestamp()}_{filename}")
+    file.save(file_path)
+    
+    # Calculate size
+    size_bytes = os.path.getsize(file_path)
+    size_str = f"{size_bytes / (1024*1024):.1f} MB" if size_bytes > 1024*1024 else f"{size_bytes / 1024:.1f} KB"
+    ext = filename.split('.')[-1].upper() if '.' in filename else 'FILE'
+
+    obj = HRDocument(
+        company_id=_company_id(),
+        title=title,
+        category=category,
+        file_path=file_path,
+        file_size=size_str,
+        file_type=ext,
+        created_by=_user_id()
+    )
+    db.session.add(obj)
+    db.session.commit()
+    return _json_ok({"id": obj.id}, "Policy uploaded")
+
+@hr_docs_bp.delete("/policies/<int:pid>")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def policies_delete(pid):
+    obj = HRDocument.query.filter_by(id=pid, company_id=_company_id()).first_or_404()
+    # Optional: Delete file from disk
+    if os.path.exists(obj.file_path):
+        os.remove(obj.file_path)
+    db.session.delete(obj)
+    db.session.commit()
+    return _json_ok({"id": pid}, "Policy deleted")
+
+@hr_docs_bp.get("/policies/<int:pid>/download")
+@token_required
+def policies_download(pid):
+    obj = HRDocument.query.filter_by(id=pid, company_id=_company_id()).first_or_404()
+    if not os.path.exists(obj.file_path):
+        return jsonify({"success": False, "message": "File not found on server"}), 404
+    return send_file(obj.file_path, as_attachment=True, download_name=os.path.basename(obj.file_path))
+
+# TAB 2: EMPLOYEE DOCUMENTS
+@hr_docs_bp.get("/employee-docs/list")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def employee_docs_list():
+    search = request.args.get("search", "")
+    query = db.session.query(EmployeeDocument, Employee).join(Employee, EmployeeDocument.employee_id == Employee.id)
+    query = query.filter(Employee.company_id == _company_id())
+    
+    if search:
+        query = query.filter(Employee.full_name.ilike(f"%{search}%"))
+        
+    items = query.all()
+    data = []
+    for doc, emp in items:
+        # Calculate size if not stored
+        size_str = "0.0 MB"
+        if doc.file_path and os.path.exists(doc.file_path):
+            size_bytes = os.path.getsize(doc.file_path)
+            size_str = f"{size_bytes / (1024*1024):.1f} MB" if size_bytes > 1024*1024 else f"{size_bytes / 1024:.1f} KB"
+
+        data.append({
+            "id": doc.id,
+            "employee_name": emp.full_name,
+            "document_name": doc.document_name or doc.document_type,
+            "type": doc.file_path.split('.')[-1].upper() if doc.file_path and '.' in doc.file_path else 'PDF',
+            "verification_status": "Verified" if doc.verified else "Pending Verification",
+            "size": size_str,
+            "upload_date": doc.created_at.strftime('%b %d, %Y')
+        })
+    return _json_ok(data)
+
+@hr_docs_bp.post("/employee-docs/<int:did>/verify")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def employee_docs_verify(did):
+    doc = EmployeeDocument.query.get_or_404(did)
+    # Check company ownership
+    emp = Employee.query.get(doc.employee_id)
+    if not emp or emp.company_id != _company_id():
+        return jsonify({"success": False, "message": "Access denied"}), 403
+        
+    doc.verified = not doc.verified # Toggle
+    doc.verified_by = _user_id()
+    doc.verified_date = datetime.utcnow()
+    db.session.commit()
+    return _json_ok({"verified": doc.verified}, "Status updated")
+
+@hr_docs_bp.get("/employee-docs/<int:did>/download")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def employee_docs_download(did):
+    doc = EmployeeDocument.query.get_or_404(did)
+    emp = Employee.query.get(doc.employee_id)
+    if not emp or emp.company_id != _company_id():
+        return jsonify({"success": False, "message": "Access denied"}), 403
+        
+    if not doc.file_path or not os.path.exists(doc.file_path):
+        return jsonify({"success": False, "message": "File not found"}), 404
+    return send_file(doc.file_path, as_attachment=True)
+
+# EMPLOYEE VIEW
+@hr_docs_bp.get("/employee/policies")
+@token_required
+def employee_policies():
+    # Employees can see all policies for their company
+    items = HRDocument.query.filter_by(company_id=_company_id()).all()
+    data = [{
+        "id": x.id,
+        "document_name": x.title,
+        "category": x.category,
+        "type": x.file_type or "PDF",
+        "size": x.file_size or "0.0 MB",
+        "upload_date": x.created_at.strftime('%b %d, %Y')
+    } for x in items]
+    return _json_ok(data)
 
 @hr_docs_bp.get("/letters/recent")
 @token_required
@@ -492,70 +1113,68 @@ def certificates_issue():
     payload = request.get_json(silent=True) or {}
 
     cert_type = payload.get("CertificateType")
-    recipient = payload.get("Recipient")
-    recipient_email = payload.get("RecipientEmail")
+    recipient = payload.get("Recipient") 
+    employee_id_str = payload.get("EmployeeID")
+    designation = payload.get("Designation")
     issue_date_str = payload.get("Date")
+    purpose = payload.get("Purpose")
+    
     template_option = payload.get("TemplateOption", "Standard Format")
     send_copy = bool(payload.get("SendEmailCopyToEmployee", False))
-    details = payload.get("Details") or {}
 
-    if not cert_type or not recipient or not recipient_email or not issue_date_str:
-        return jsonify({"success": False, "message": "CertificateType, Recipient, RecipientEmail, Date required"}), 400
+    if not cert_type or not recipient or not issue_date_str:
+        return jsonify({"success": False, "message": "CertificateType, Recipient (Name), and Date are required"}), 400
 
-    # Dynamic content
+    # Ensure cert_type is safe for lower()
+    cert_type_safe = str(cert_type).lower()
+
+    # Store designation and purpose in payload
     context = {
         "recipient": recipient,
-        "recipient_email": recipient_email,
+        "employee_id": employee_id_str,
+        "designation": designation,
+        "purpose": purpose,
         "date": issue_date_str,
-        "template_option": template_option,
-        **details
+        "template_option": template_option
     }
 
-    content = (
-        f"{cert_type}\n"
-        f"Recipient: {recipient}\n"
-        f"Date: {issue_date_str}\n"
-        f"Template: {template_option}\n\n"
-    )
-    if details:
-        content += "Details:\n"
-        for k, v in details.items():
-            content += f"- {k}: {v}\n"
+    # Simplified content for generation
+    description_map = {
+        "EXPERIENCE_CERTIFICATE": "Experience Certificate",
+        "INTERNSHIP_CERTIFICATE": "Internship Certificate",
+        "APPRECIATION_LETTER": "Appreciation Letter"
+    }
+    cert_title = description_map.get(cert_type, cert_type.replace('_', ' ').title())
 
-    file_path = _save_text_as_file(content, f"certificate_{cert_type.lower()}")
+    content = f"{cert_title}\n\n"
+    content += f"This is to certify that {recipient} ({employee_id_str or 'N/A'}) "
+    if designation:
+        content += f"has worked as {designation}. "
+    if purpose:
+        content += f"\n\nPurpose/Remarks: {purpose}"
+    content += f"\n\nIssued Date: {issue_date_str}"
+
+    file_path = _save_text_as_file(content, f"certificate_{cert_type_safe}")
 
     obj = CertificateIssue(
         company_id=_company_id(),
         recipient=recipient,
         certificate_type=cert_type,
-        issue_date=date.fromisoformat(issue_date_str),
-        recipient_email=recipient_email,
+        issue_date=date.fromisoformat(str(issue_date_str)),
         template_option=template_option,
         send_email_copy=send_copy,
-        payload=context,
+        payload=context, # Stores designation, purpose, etc.
         pdf_path=file_path,
         issued_by=_user_id()
     )
     db.session.add(obj)
     db.session.commit()
 
-    email_status = "Not Sent"
-    if send_copy:
-        subject = f"{cert_type.replace('_',' ')} - {recipient}"
-        body = f"Hello {recipient},\n\nPlease find attached your {cert_type.replace('_',' ')}.\nDate: {issue_date_str}\n\nRegards,\nHR Team"
-        sent = _send_email_with_attachment(recipient_email, subject, body, file_path)
-        email_status = "Sent" if sent else "Failed"
-
-    abs_download = request.host_url.rstrip("/") + f"/api/hr-docs/certificates/{obj.id}/download"
-
     return _json_ok({
         "CertificateId": obj.id,
         "Recipient": recipient,
         "CertificateType": cert_type,
-        "IssueDate": issue_date_str,
-        "EmailStatus": email_status,
-        "DownloadUrl": f"/api/hr-docs/certificates/{obj.id}/download",
-        "DownloadUrlAbsolute": abs_download
+        "IssueDate": issue_date_str
     }, "Certificate issued")
 
 
@@ -566,14 +1185,21 @@ def certificates_history():
     items = CertificateIssue.query.filter_by(company_id=_company_id()) \
         .order_by(CertificateIssue.created_at.desc()).all()
 
-    data = [{
-        "CertificateId": x.id,
-        "Recipient": x.recipient,
-        "CertificateType": x.certificate_type,
-        "IssueDate": (x.payload or {}).get("date"),
-        "ReadOnly": _is_read_only(),
-        "CanDownload": (g.user.role == "HR")
-    } for x in items]
+    data = []
+    for x in items:
+        # Get details from payload if needed
+        payload = x.payload or {}
+        data.append({
+            "id": x.id,
+            "Recipient": x.recipient,
+            "EmployeeID": payload.get("employee_id", "N/A"),
+            "CertificateType": x.certificate_type.replace('_', ' ').title(),
+            "IssueDate": x.issue_date.strftime('%b %d, %Y') if x.issue_date else "N/A",
+            "Actions": {
+                "view": True,
+                "download": bool(x.pdf_path)
+            }
+        })
     return _json_ok(data)
 
 
@@ -586,16 +1212,38 @@ def certificates_view(cid):
         return jsonify({"success": False, "message": "Not found"}), 404
 
     return _json_ok({
-        "CertificateId": obj.id,
+        "id": obj.id,
         "Recipient": obj.recipient,
-        "RecipientEmail": getattr(obj, "recipient_email", None),
         "CertificateType": obj.certificate_type,
         "IssueDate": obj.issue_date.isoformat() if obj.issue_date else None,
-        "TemplateOption": getattr(obj, "template_option", None),
-        "Payload": obj.payload,
-        "ReadOnly": _is_read_only(),
-        "CanDownload": (g.user.role == "HR")
+        "Payload": obj.payload, # Contains EmployeeID, Designation, Purpose
+        "ReadOnly": _is_read_only()
     })
+
+@hr_docs_bp.get("/onboarding/employees/search")
+@token_required
+@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+def onboarding_employee_search():
+    """
+    Helper for Certificate Modal to search employees by name.
+    """
+    search_query = request.args.get("q", "")
+    if not search_query:
+        return _json_ok([])
+        
+    employees = Employee.query.filter(
+        Employee.company_id == _company_id(),
+        Employee.full_name.ilike(f"%{search_query}%")
+    ).limit(10).all()
+    
+    data = [{
+        "id": e.id,
+        "full_name": e.full_name,
+        "employee_id_code": e.employee_id_code, # e.g. EMP-101
+        "designation": e.designation
+    } for e in employees]
+    
+    return _json_ok(data)
 
 
 @hr_docs_bp.put("/certificates/<int:cid>")

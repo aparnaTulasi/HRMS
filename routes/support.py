@@ -26,32 +26,37 @@ def get_tickets():
 @token_required
 def get_dashboard_stats():
     """
-    Returns stats for the Concierge & Support header cards:
-    - Total Active
-    - Pending Action
-    - Resolution Rate
+    Returns stats for the Support Dashboard cards:
+    - Total Tickets
+    - Open
+    - In Progress
+    - Resolved
     """
     try:
-        # Filter by company if not Super Admin
         q = SupportTicket.query
         if g.user.role != 'SUPER_ADMIN':
             q = q.filter_by(company_id=g.user.company_id)
+        
+        # If Employee, only show their own stats? 
+        # Usually dashboard stats for "Support Helpdesk" are for the whole company if viewable by HR/Admin.
+        # But if the user is an employee, they might only see their own.
+        if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
+            q = q.filter_by(created_by=g.user.id)
             
         tickets = q.all()
         
-        total_active = len([t for t in tickets if t.status in ['Open', 'In Progress']])
-        pending_action = len([t for t in tickets if t.status == 'Open'])
-        
-        resolved = len([t for t in tickets if t.status == 'Closed'])
         total = len(tickets)
-        resolution_rate = round((resolved / total * 100), 1) if total > 0 else 0
+        open_count = len([t for t in tickets if t.status == 'Open'])
+        in_progress = len([t for t in tickets if t.status == 'In Progress'])
+        resolved = len([t for t in tickets if t.status in ['Resolved', 'Closed']])
         
         return jsonify({
             'success': True,
             'data': {
-                'total_active': total_active,
-                'pending_action': pending_action,
-                'resolution_rate': f"{resolution_rate}%"
+                'total_tickets': total,
+                'open': open_count,
+                'in_progress': in_progress,
+                'resolved': resolved
             }
         }), 200
     except Exception as e:
@@ -62,15 +67,27 @@ def get_dashboard_stats():
 def create_ticket():
     data = request.get_json()
     try:
-        import random
-        new_ticket_id = f"#TKT-{random.randint(100, 999)}"
+        # Generate Sequential ID: SUP-001
+        last_ticket = SupportTicket.query.filter_by(company_id=g.user.company_id).order_by(SupportTicket.id.desc()).first()
+        if last_ticket and last_ticket.ticket_id.startswith('SUP-'):
+            try:
+                last_num = int(last_ticket.ticket_id.split('-')[1])
+                new_num = last_num + 1
+            except:
+                new_num = 1
+        else:
+            new_num = 1
+        
+        new_ticket_id = f"SUP-{new_num:03d}"
+        
         new_ticket = SupportTicket(
             ticket_id=new_ticket_id,
             subject=data.get('subject'),
             category=data.get('category'),
-            priority=data.get('priority', 'Medium'),
+            priority=data.get('priority', 'Low'),
             status='Open',
             description=data.get('description'),
+            attachment_url=data.get('attachment_url'),
             company_id=g.user.company_id,
             created_by=g.user.id
         )
@@ -88,16 +105,20 @@ def create_ticket():
 def update_ticket(id):
     data = request.get_json()
     try:
-        ticket = SupportTicket.query.filter_by(id=id).first()
-        if not ticket:
-            ticket = SupportTicket.query.filter_by(ticket_id=id).first() # fallback if passed #TKT
+        ticket = SupportTicket.query.get(id)
         if not ticket:
             return jsonify({'message': 'Ticket not found'}), 404
             
+        # Permission check
+        if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN'] and ticket.created_by != g.user.id:
+            return jsonify({'message': 'Unauthorized'}), 403
+
         if 'status' in data:
             ticket.status = data['status']
         if 'priority' in data:
             ticket.priority = data['priority']
+        if 'category' in data:
+            ticket.category = data['category']
             
         db.session.commit()
         return jsonify({'message': 'Ticket updated successfully', 'ticket': ticket.to_dict()}), 200

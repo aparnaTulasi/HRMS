@@ -4,7 +4,7 @@ from models.loan import Loan
 from models.employee import Employee
 from utils.decorators import token_required
 from sqlalchemy import func
-from datetime import datetime
+from datetime import datetime, timedelta
 import calendar
 
 loan_bp = Blueprint('loan', __name__)
@@ -43,22 +43,19 @@ def get_loan_dashboard():
     type_distribution = [{"type": t[0], "total": t[1]} for t in type_dist]
 
     # 5. Monthly Disbursement Trend (Bar Chart)
-    # Get last 5 months
     trend = []
     now = datetime.utcnow()
     for i in range(4, -1, -1):
-        month = now.month - i
-        year = now.year
-        if month <= 0:
-            month += 12
-            year -= 1
-        
+        target_date = now - timedelta(days=i*30)
+        month = target_date.month
+        year = target_date.year
         month_name = calendar.month_name[month][:3]
         
+        # SQLite compatible month/year extraction using strftime
         monthly_sum = db.session.query(func.sum(Loan.amount)).filter(
              Loan.company_id == company_id,
-             func.extract('month', Loan.disbursement_date) == month,
-             func.extract('year', Loan.disbursement_date) == year,
+             func.strftime('%m', Loan.disbursement_date) == f"{month:02d}",
+             func.strftime('%Y', Loan.disbursement_date) == str(year),
              Loan.status.in_(['APPROVED', 'ACTIVE', 'PAID'])
         ).scalar() or 0.0
         

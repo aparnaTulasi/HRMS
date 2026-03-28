@@ -46,8 +46,14 @@ from routes.feedback import feedback_bp
 from routes.loan_routes import loan_bp
 from routes.team_routes import team_bp
 from routes.recruitment_routes import recruit_bp
+from routes.onboarding import onboarding_bp
+from routes.department_routes import dept_bp
+from routes.access_control import access_control_bp
+from routes.training_routes import training_bp
+from routes.expense_routes import expense_bp
+from routes.dashboard_routes import dashboard_bp
 
-from models.user_permission import UserPermission
+from models.permission import Permission, UserPermission
 from models.department import Department
 from models.designation import Designation
 from models.bank_details import BankDetails
@@ -107,6 +113,12 @@ app.register_blueprint(feedback_bp, url_prefix="/api")
 app.register_blueprint(loan_bp, url_prefix="/api/loans")
 app.register_blueprint(team_bp)
 app.register_blueprint(recruit_bp)
+app.register_blueprint(onboarding_bp, url_prefix="/api/hr/onboarding")
+app.register_blueprint(dept_bp, url_prefix="/api")
+app.register_blueprint(access_control_bp, url_prefix="/api/admin/access-control")
+app.register_blueprint(training_bp, url_prefix="/api/hr/training")
+app.register_blueprint(expense_bp, url_prefix="/api/expenses")
+app.register_blueprint(dashboard_bp, url_prefix="/api/dashboard")
 
 @app.route('/')
 def home():
