@@ -21,6 +21,10 @@ from utils.email_utils import send_login_credentials, send_account_created_alert
 import jwt
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 
+# Additional imports for dashboard
+from models.hr_documents import WFHRequest
+from models.travel_expense import TravelExpense
+
 superadmin_bp = Blueprint("superadmin", __name__)
 
 # ---------------------------
@@ -377,8 +381,18 @@ def create_user():
         # Update User Email and Status if needed
         if emp.company_email:
             target_user.email = emp.company_email
+            
         if data.get("status"):
-            target_user.status = data.get("status").upper()
+            new_status = data.get("status").upper()
+            target_user.status = new_status
+            emp.status = new_status
+            if new_status == 'INACTIVE':
+                target_user.is_active = False
+                emp.is_active = False
+            elif new_status == 'ACTIVE':
+                target_user.is_active = True
+                emp.is_active = True
+                
         if data.get("role"):
             target_user.role = data.get("role").upper()
         
@@ -600,8 +614,11 @@ def get_dashboard_stats():
         combined_pending = []
         
         # 1. Leaves
-        l_pending = pending_q.order_by(LeaveRequest.created_at.desc()).limit(5).all()
-        for r in l_pending:
+        l_pending = LeaveRequest.query.filter_by(status='PENDING')
+        if not is_super:
+            l_pending = l_pending.filter_by(company_id=cid)
+        l_items = l_pending.order_by(LeaveRequest.created_at.desc()).limit(5).all()
+        for r in l_items:
             combined_pending.append({
                 "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
                 "type": "Leave Request", "date": r.created_at, "color": "#6366f1"
@@ -671,49 +688,38 @@ def get_dashboard_stats():
 @superadmin_bp.route("/employees/<employee_id>", methods=["DELETE"])
 @token_required
 @role_required(["SUPER_ADMIN"])
-def delete_employee(employee_id):
+def deactivate_employee(employee_id):
+    """
+    Mark an employee and their user record as INACTIVE instead of deleting.
+    """
     emp = Employee.query.filter_by(employee_id=str(employee_id)).first()
-
     if not emp and str(employee_id).isdigit():
         emp = Employee.query.get(int(employee_id))
 
     if not emp:
         return jsonify({"success": False, "message": "Employee not found"}), 404
 
-    force = request.args.get("force", "false").lower() == "true"
     user = User.query.get(emp.user_id) if emp.user_id else None
 
     try:
-        if not force:
-            # --- SOFT DELETE ---
-            if hasattr(emp, "status"):
-                emp.status = "DELETED"
-            if hasattr(emp, "is_active"):
-                emp.is_active = False
-            if user:
-                if hasattr(user, "status"):
-                    user.status = "DELETED"
-            db.session.commit()
-            return jsonify({"success": True, "message": "Employee deleted (soft delete)"}), 200
-
-        # --- HARD DELETE (PERMANENT) ---
-        # To prevent foreign key errors, we must first handle relationships
-        # where this employee is a manager.
-
-        # 1. Un-assign this manager from any employees who report to them.
-        Employee.query.filter_by(manager_id=emp.id).update({"manager_id": None})
-
-        # 2. Un-assign this manager from any departments they manage.
-        # Use direct table column access to avoid any potential ORM attribute mapping issues.
-        Department.query.filter(Department.__table__.c.manager_id == emp.id).update({"manager_id": None})
-
-        # Now it's safe to delete the employee and their user record.
-        db.session.delete(emp)
+        # Mark Employee as Inactive
+        emp.status = "INACTIVE"
+        emp.is_active = False
+        
+        # Mark linked User as Inactive
         if user:
-            db.session.delete(user)
+            user.status = "INACTIVE"
+            user.is_active = False
+
         db.session.commit()
-        return jsonify({"success": True, "message": "Employee deleted permanently"}), 200
+        
+        from utils.audit_logger import log_action
+        log_action("DEACTIVATE_EMPLOYEE", "Employee", emp.id, 200, meta={"employee_id": emp.employee_id, "name": emp.full_name})
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Employee {emp.full_name} has been deactivated successfully."
+        }), 200
     except Exception as e:
         db.session.rollback()
-        action = "permanently deleting" if force else "soft-deleting"
-        return jsonify({"success": False, "message": f"Error {action} employee", "error": str(e)}), 500
+        return jsonify({"success": False, "message": "Error deactivating employee", "error": str(e)}), 500

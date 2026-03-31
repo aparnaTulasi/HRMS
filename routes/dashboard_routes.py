@@ -29,7 +29,7 @@ def get_dashboard_stats():
     today = date.today()
     
     # 1. Attendance Data
-    att = Attendance.query.filter_by(employee_id=emp.id, date=today).first()
+    att = Attendance.query.filter_by(employee_id=emp.id, attendance_date=today).first()
     status = "Absent"
     in_time = "--:--"
     out_time = "--:--"
@@ -37,15 +37,16 @@ def get_dashboard_stats():
     
     if att:
         status = att.status
-        if att.in_time:
-            in_time = att.in_time.strftime("%I:%M %p")
-        if att.out_time:
-            out_time = att.out_time.strftime("%I:%M %p")
+        if att.punch_in_time:
+            in_time = att.punch_in_time.strftime("%I:%M %p")
+        if att.punch_out_time:
+            out_time = att.punch_out_time.strftime("%I:%M %p")
         
-        # Calculate logged hours
-        if att.work_hours:
-            h = int(att.work_hours)
-            m = int((att.work_hours - h) * 60)
+        # Calculate logged hours using the total_minutes property
+        total_mins = att.total_minutes
+        if total_mins > 0:
+            h = total_mins // 60
+            m = total_mins % 60
             logged_hours = f"{h}h {m}m"
 
     # 2. Shift Data

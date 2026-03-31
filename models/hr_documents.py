@@ -199,6 +199,12 @@ class HRDocument(db.Model):
     file_path = db.Column(db.String(255), nullable=False)
     file_size = db.Column(db.String(20), nullable=True)
     file_type = db.Column(db.String(20), nullable=True)
+    is_active = db.Column(db.Boolean, default=True)
+    status = db.Column(db.String(20), default="Active") # Active, Inactive
+    is_sensitive = db.Column(db.Boolean, default=False) # Restricted to Admin/Super Admin
+    
+    last_viewed_at = db.Column(db.DateTime, nullable=True) # Last viewed by any user
+    view_count = db.Column(db.Integer, default=0) # Total number of times viewed/downloaded
 
     created_by = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

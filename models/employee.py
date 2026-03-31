@@ -25,6 +25,8 @@ class Employee(db.Model):
     emergency_contact = db.Column(db.String(100))
     onboarding_status = db.Column(db.String(50), default='Pending') # Pending, In Progress, Document Verification, Completed
     onboarding_completed_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default='ACTIVE')
+    is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

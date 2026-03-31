@@ -24,13 +24,21 @@ admin_bp = Blueprint('admin', __name__)
 @token_required
 @role_required(['ADMIN', 'HR', 'SUPER_ADMIN', 'EMPLOYEE'])
 def get_employees():
+    # Default filter: only active
+    include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+    
     if g.user.role == 'SUPER_ADMIN':
-        employees = Employee.query.all()
+        query = Employee.query
     elif g.user.role == 'EMPLOYEE':
-        # Employee can only see their own record
-        employees = Employee.query.filter_by(user_id=g.user.id).all()
+        # Employee can only see their own record (regardless of status for now)
+        query = Employee.query.filter_by(user_id=g.user.id)
     else:
-        employees = Employee.query.filter_by(company_id=g.user.company_id).all()
+        query = Employee.query.filter_by(company_id=g.user.company_id)
+
+    if not include_inactive and g.user.role != 'EMPLOYEE':
+        query = query.filter(Employee.is_active == True)
+        
+    employees = query.all()
 
     result = []
     for emp in employees:
@@ -88,13 +96,13 @@ def get_employee(emp_id):
 @admin_bp.route('/employees/<int:emp_id>', methods=['DELETE'])
 @token_required
 @role_required(['ADMIN', 'SUPER_ADMIN'])
-def delete_employee(emp_id):
-    """Permanently delete an employee and their user account from the database."""
+def deactivate_employee(emp_id):
+    """Mark an employee and their user records as INACTIVE instead of deleting from the database."""
     try:
         if g.user.role == 'SUPER_ADMIN':
             emp = Employee.query.get(emp_id)
         else:
-            # ADMIN can only delete from their own company
+            # ADMIN can only deactivate from their own company
             emp = Employee.query.filter_by(id=emp_id, company_id=g.user.company_id).first()
 
         if not emp:
@@ -103,30 +111,32 @@ def delete_employee(emp_id):
         emp_name = emp.full_name
         user_id = emp.user_id
 
-        # Permanently delete the employee profile first (child record)
-        db.session.delete(emp)
-        db.session.flush()
+        # Mark Employee as INACTIVE
+        emp.status = "INACTIVE"
+        emp.is_active = False
 
-        # Then permanently delete the user account (parent record)
+        # Mark linked User as INACTIVE
         if user_id:
             user = User.query.get(user_id)
             if user:
-                db.session.delete(user)
+                user.status = "INACTIVE"
+                user.is_active = False
 
         db.session.commit()
-        log_action("DELETE_EMPLOYEE", "Employee", emp_id, 200, meta={"name": emp_name})
-        return jsonify({'success': True, 'message': f'Employee "{emp_name}" permanently deleted.'}), 200
+        log_action("DEACTIVATE_EMPLOYEE", "Employee", emp_id, 200, meta={"name": emp_name})
+        return jsonify({'success': True, 'message': f'Employee "{emp_name}" has been deactivated successfully.'}), 200
 
     except Exception as e:
         db.session.rollback()
         import traceback
-        logging.error(f'delete_employee error: {traceback.format_exc()}')
-        return jsonify({'success': False, 'message': f'Delete failed: {str(e)}'}), 500
+        logging.error(f'deactivate_employee error: {traceback.format_exc()}')
+        return jsonify({'success': False, 'message': f'Deactivation failed: {str(e)}'}), 500
 
 @admin_bp.route('/employees/<int:emp_id>', methods=['PUT', 'PATCH'])
 @token_required
 @role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
 def update_employee(emp_id):
+    """Update an employee's profile and user account details."""
     if g.user.role == 'SUPER_ADMIN':
         emp = Employee.query.get(emp_id)
     else:
@@ -146,11 +156,22 @@ def update_employee(emp_id):
         if 'password' in data and data['password']:
             from werkzeug.security import generate_password_hash
             emp.user.password = generate_password_hash(data['password'])
+        
+        # Synchronize Status and Active flags
         if 'status' in data:
-            emp.user.status = data['status'].upper()
+            new_status = data['status'].upper()
+            emp.user.status = new_status
+            emp.status = new_status
+            
+            # If deactivating via update, set is_active flags
+            if new_status == 'INACTIVE':
+                emp.is_active = False
+                emp.user.is_active = False
+            elif new_status == 'ACTIVE':
+                emp.is_active = True
+                emp.user.is_active = True
 
     # Update employee fields
-    # Fields that can be directly mapped
     direct_fields = ['full_name', 'department', 'designation', 'phone_number', 'personal_email', 'pay_grade', 'employment_type', 'gender', 'company_email']
     for field in direct_fields:
         if field in data:
@@ -168,17 +189,16 @@ def update_employee(emp_id):
 
     # Explicitly ignore CTC
     if 'ctc' in data:
-        # We don't save CTC
         pass
     
     try:
         db.session.commit()
+        log_action("UPDATE_EMPLOYEE", "Employee", emp_id, 200, meta=data)
+        return jsonify({'success': True, 'message': 'Employee updated successfully'})
     except Exception as e:
         db.session.rollback()
+        logging.error(f'update_employee error: {str(e)}')
         return jsonify({'success': False, 'message': f'Update failed: {str(e)}'}), 500
-        
-    log_action("UPDATE_EMPLOYEE", "Employee", emp_id, 200, meta=data)
-    return jsonify({'success': True, 'message': 'Employee updated successfully'})
 
 def _set_if_exists(obj, field, value):
     if value is None:

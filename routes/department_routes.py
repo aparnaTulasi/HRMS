@@ -15,12 +15,18 @@ def list_departments():
     try:
         if g.user.role == 'SUPER_ADMIN':
             company_id = request.args.get('company_id')
+            query = Department.query
             if company_id:
-                departments = Department.query.filter_by(company_id=company_id).all()
-            else:
-                departments = Department.query.all()
+                query = query.filter_by(company_id=company_id)
         else:
-            departments = Department.query.filter_by(company_id=g.user.company_id).all()
+            query = Department.query.filter_by(company_id=g.user.company_id)
+        
+        # Default filter: only active
+        include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+        if not include_inactive:
+            query = query.filter(Department.is_active == True)
+            
+        departments = query.all()
 
         return jsonify({
             "success": True,
@@ -35,6 +41,7 @@ def list_departments():
                     "department_head": Employee.query.get(d.manager_id).full_name if d.manager_id and Employee.query.get(d.manager_id) else "N/A",
                     "manager_id": d.manager_id,
                     "is_active": d.is_active,
+                    "status": d.status,
                     "description": d.description
                 } for d in departments
             ]
@@ -126,7 +133,8 @@ def update_department(dept_id):
 @dept_bp.route('/departments/<int:dept_id>', methods=['DELETE'])
 @token_required
 @role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
-def delete_department(dept_id):
+def deactivate_department(dept_id):
+    """Mark a department as INACTIVE instead of deleting."""
     try:
         dept = Department.query.get(dept_id)
         if not dept:
@@ -136,9 +144,14 @@ def delete_department(dept_id):
         if g.user.role != 'SUPER_ADMIN' and dept.company_id != g.user.company_id:
             return jsonify({"success": False, "message": "Unauthorized"}), 403
 
-        db.session.delete(dept)
+        dept.is_active = False
+        dept.status = "INACTIVE"
         db.session.commit()
-        return jsonify({"success": True, "message": "Department deleted successfully"}), 200
+        
+        from utils.audit_logger import log_action
+        log_action("DEACTIVATE_DEPARTMENT", "Department", dept.id, 200, meta={"name": dept.department_name})
+        
+        return jsonify({"success": True, "message": f"Department '{dept.department_name}' deactivated successfully"}), 200
 
     except Exception as e:
         db.session.rollback()

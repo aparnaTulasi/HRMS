@@ -138,7 +138,7 @@ def verify_signup_otp():
     if not user:
         return jsonify({'message': 'Invalid OTP'}), 400
 
-    if user.status == 'ACTIVE':
+    if user.status and user.status.upper() == 'ACTIVE':
         return jsonify({'message': 'User is already active'}), 200
 
     # Validate OTP Expiry
@@ -197,7 +197,7 @@ def resend_signup_otp():
     if not user:
         return jsonify({'message': 'User not found'}), 404
 
-    if user.status == 'ACTIVE':
+    if user.status and user.status.upper() == 'ACTIVE':
         return jsonify({'message': 'Account already active'}), 400
 
     # Generate OTP
@@ -233,6 +233,7 @@ def resend_reset_otp():
 
 @auth_bp.route('/login', methods=['POST'])
 def login():
+    company = None
     data = request.get_json()
     if not data or not data.get('email') or not data.get('password'):
         return jsonify({'message': 'Email and password are required'}), 400
@@ -254,11 +255,19 @@ def login():
         print(f"❌ Login Failed: Password mismatch for {email}")  # Debug log
         return jsonify({'message': 'Invalid credentials'}), 401
 
-    if user.status != 'ACTIVE':
-        return jsonify({'message': f'User account is {user.status}. Please verify your email or contact admin.'}), 403
+    if user.status and user.status.upper() != 'ACTIVE':
+        return jsonify({'message': f'Your account status is {user.status}. Please contact support.'}), 403
+
+    if hasattr(user, 'is_active') and user.is_active == False:
+        return jsonify({'message': 'Your account has been deactivated. Please contact support.'}), 403
+
+    # Check Company Status
+    if user.role != 'SUPER_ADMIN' and user.company_id:
+        company = Company.query.get(user.company_id)
+        if company and company.status and company.status.upper() == 'INACTIVE':
+            return jsonify({'message': 'Your company account has been deactivated. Please contact support.'}), 403
 
     employee = Employee.query.filter_by(user_id=user.id).first()
-    company = Company.query.filter_by(id=user.company_id).first()
 
     token = jwt.encode({
         'user_id': user.id,

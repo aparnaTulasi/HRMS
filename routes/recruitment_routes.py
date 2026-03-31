@@ -57,6 +57,12 @@ def get_jobs():
     status = request.args.get('status', 'Open')
 
     query = JobPosting.query.filter_by(company_id=company_id)
+    
+    # Default filter: only active
+    include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+    if not include_inactive:
+        query = query.filter(JobPosting.is_active == True)
+        
     if search:
         query = query.filter(JobPosting.job_title.ilike(f"%{search}%"))
     if status != 'All':
@@ -110,14 +116,20 @@ def post_job():
 @recruit_bp.route('/api/recruitment/jobs/<int:job_id>', methods=['DELETE'])
 @token_required
 @role_required(['HR'])
-def delete_job(job_id):
+def deactivate_job(job_id):
+    """Mark a job posting as INACTIVE instead of deleting."""
     job = JobPosting.query.get(job_id)
     if not job:
         return jsonify({"success": False, "message": "Job not found"}), 404
     
-    db.session.delete(job)
+    job.is_active = False
+    job.status = "Closed" # Also mark as closed
     db.session.commit()
-    return jsonify({"success": True, "message": "Job posting deleted"})
+    
+    from utils.audit_logger import log_action
+    log_action("DEACTIVATE_JOB", "JobPosting", job.id, 200, meta={"title": job.job_title})
+    
+    return jsonify({"success": True, "message": f"Job posting '{job.job_title}' has been deactivated."})
 
 @recruit_bp.route('/api/recruitment/jobs/<int:job_id>/applicants', methods=['GET'])
 @token_required

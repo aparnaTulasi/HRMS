@@ -11,8 +11,6 @@ class Attendance(db.Model):
 
     company_id = db.Column(db.Integer, db.ForeignKey("companies.id"), nullable=False, index=True)
     employee_id = db.Column(db.Integer, db.ForeignKey("employees.id"), nullable=True, index=True)
-    super_admin_id = db.Column(db.Integer, db.ForeignKey("super_admins.id"), nullable=True, index=True)
-
     # Main unique key for UPSERT
     attendance_date = db.Column(db.Date, nullable=False, index=True)
 
@@ -33,7 +31,7 @@ class Attendance(db.Model):
     # manual/import/web/biometric (you said no self punch, still keep for audit)
     capture_method = db.Column(db.String(50), default="Manual", nullable=False)  # Manual / Import
 
-    # Audit
+    # Audit (preserved as per user suggestion)
     created_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     updated_by = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
 
@@ -41,7 +39,7 @@ class Attendance(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     __table_args__ = (
-        db.UniqueConstraint("company_id", "employee_id", "super_admin_id", "attendance_date", name="uq_att_company_emp_sa_date"),
+        db.UniqueConstraint("company_id", "employee_id", "attendance_date", name="uq_att_company_emp_date"),
     )
 
     @property

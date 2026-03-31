@@ -30,6 +30,8 @@ from models.hr_documents import (
 )
 from models.employee_documents import EmployeeDocument
 from models.employee import Employee
+from models.audit_log import AuditLog
+from utils.audit_logger import log_action
 
 hr_docs_bp = Blueprint("hr_docs_bp", __name__)
 
@@ -824,14 +826,30 @@ def letters_variable_seed():
 @hr_docs_bp.get("/policies/list")
 @token_required
 def policies_list():
-    items = HRDocument.query.filter_by(company_id=_company_id()).all()
+    """
+    Unified view:
+    - Admin/SA/HR see all policies.
+    - Employees see only active and non-sensitive policies.
+    """
+    q = HRDocument.query
+    if g.user.role not in ['SUPER_ADMIN']:
+        q = q.filter_by(company_id=_company_id())
+    
+    if g.user.role in ['EMPLOYEE', 'MANAGER']:
+        q = q.filter_by(is_active=True, is_sensitive=False)
+        
+    items = q.order_by(HRDocument.created_at.desc()).all()
     data = [{
         "id": x.id,
         "document_name": x.title,
         "category": x.category,
         "type": x.file_type or "PDF",
         "size": x.file_size or "0.0 MB",
-        "upload_date": x.created_at.strftime('%b %d, %Y')
+        "upload_date": x.created_at.strftime('%b %d, %Y'),
+        "status": x.status,
+        "is_active": x.is_active,
+        "is_sensitive": x.is_sensitive,
+        "views": x.view_count or 0
     } for x in items]
     return _json_ok(data)
 
@@ -889,9 +907,23 @@ def policies_delete(pid):
 @hr_docs_bp.get("/policies/<int:pid>/download")
 @token_required
 def policies_download(pid):
-    obj = HRDocument.query.filter_by(id=pid, company_id=_company_id()).first_or_404()
+    obj = HRDocument.query.filter_by(id=pid).first_or_404()
+    if g.user.role not in ['SUPER_ADMIN'] and obj.company_id != _company_id():
+        return jsonify({"success": False, "message": "Access denied"}), 403
+    
+    # Restrict sensitive docs to Admin/SA
+    if obj.is_sensitive and g.user.role not in ['ADMIN', 'SUPER_ADMIN']:
+        return jsonify({"success": False, "message": "Sensitive document access denied"}), 403
+
     if not os.path.exists(obj.file_path):
         return jsonify({"success": False, "message": "File not found on server"}), 404
+        
+    # Audit trail for preparation/viewing
+    log_action("DOCUMENT_VIEW", "HRDocument", obj.id, 200, meta={"title": obj.title, "employee": g.user.email})
+    obj.view_count = (obj.view_count or 0) + 1
+    obj.last_viewed_at = datetime.utcnow()
+    db.session.commit()
+
     return send_file(obj.file_path, as_attachment=True, download_name=os.path.basename(obj.file_path))
 
 # TAB 2: EMPLOYEE DOCUMENTS
@@ -1406,13 +1438,25 @@ def wfh_reject(wfh_id):
 @hr_docs_bp.get("/documents")
 @token_required
 @role_required(["HR", "ADMIN", "SUPER_ADMIN", "EMPLOYEE"])
-def documents_list():
-    items = HRDocument.query.filter_by(company_id=_company_id()).order_by(HRDocument.created_at.desc()).all()
+def documents_list_general():
+    """Unified General Documents List"""
+    q = HRDocument.query
+    if g.user.role not in ['SUPER_ADMIN']:
+        q = q.filter_by(company_id=_company_id())
+    
+    if g.user.role in ['EMPLOYEE', 'MANAGER']:
+        q = q.filter_by(is_active=True, is_sensitive=False)
+
+    items = q.order_by(HRDocument.created_at.desc()).all()
     data = [{
         "id": x.id,
         "title": x.title,
         "category": x.category,
-        "created_at": x.created_at.isoformat()
+        "status": x.status,
+        "is_active": x.is_active,
+        "is_sensitive": x.is_sensitive,
+        "created_at": x.created_at.isoformat(),
+        "views": x.view_count or 0
     } for x in items]
     return _json_ok(data)
 
@@ -1456,8 +1500,68 @@ def documents_upload():
 @hr_docs_bp.get("/documents/<int:did>/download")
 @token_required
 @role_required(["HR", "ADMIN", "SUPER_ADMIN", "EMPLOYEE"])
-def documents_download(did):
-    doc = HRDocument.query.filter_by(id=did, company_id=_company_id()).first()
+def documents_download_general(did):
+    doc = HRDocument.query.filter_by(id=did).first_or_404()
+    if g.user.role not in ['SUPER_ADMIN'] and doc.company_id != _company_id():
+        return jsonify({"success": False, "message": "Access denied"}), 403
+    
+    # Restrict sensitive
+    if doc.is_sensitive and g.user.role not in ['ADMIN', 'SUPER_ADMIN']:
+        return jsonify({"success": False, "message": "Document is restricted"}), 403
+
     if not doc or not os.path.exists(doc.file_path):
         return jsonify({"success": False, "message": "File not found"}), 404
+
+    # Activity log for higher authorities
+    log_action("DOCUMENT_PREPARE", "HRDocument", doc.id, 200, meta={"title": doc.title, "user": g.user.email})
+    doc.view_count = (doc.view_count or 0) + 1
+    doc.last_viewed_at = datetime.utcnow()
+    db.session.commit()
+
     return send_file(doc.file_path, as_attachment=True)
+
+# ---------------------------------------------------------
+# NEW: Toggle Document Status & Activity Monitoring
+# ---------------------------------------------------------
+
+@hr_docs_bp.post("/documents/<int:did>/toggle")
+@token_required
+@role_required(["ADMIN", "SUPER_ADMIN", "HR"])
+def toggle_document_status(did):
+    """Activate/Deactivate Documents with Audit Log"""
+    doc = HRDocument.query.get_or_404(did)
+    if g.user.role != "SUPER_ADMIN" and doc.company_id != _company_id():
+        return jsonify({"success": False, "message": "Access denied"}), 403
+
+    doc.is_active = not doc.is_active
+    doc.status = "Active" if doc.is_active else "Inactive"
+    
+    action = "DOCUMENT_ACTIVATE" if doc.is_active else "DOCUMENT_DEACTIVATE"
+    log_action(action, "HRDocument", doc.id, 200, meta={"title": doc.title})
+    
+    db.session.commit()
+    return _json_ok({"status": doc.status, "is_active": doc.is_active}, f"Document {doc.status}")
+
+@hr_docs_bp.get("/activity/logs")
+@token_required
+@role_required(["ADMIN", "SUPER_ADMIN", "HR"])
+def get_document_activity():
+    """Visibility for Higher Authorities to see Employee Actions"""
+    q = AuditLog.query.filter(AuditLog.action.in_(['DOCUMENT_VIEW', 'DOCUMENT_PREPARE']))
+    
+    if g.user.role != "SUPER_ADMIN":
+        q = q.filter_by(company_id=_company_id())
+    
+    items = q.order_by(AuditLog.created_at.desc()).limit(100).all()
+    
+    data = [{
+        "id": x.id,
+        "timestamp": x.created_at.isoformat(),
+        "user_id": x.user_id,
+        "role": x.role,
+        "action": x.action,
+        "document_name": x.meta if x.meta else "N/A",
+        "ip": x.ip_address
+    } for x in items]
+    
+    return _json_ok(data)

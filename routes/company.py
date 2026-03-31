@@ -5,9 +5,9 @@ import string
 from sqlalchemy import text  # pyre-ignore[21]
 
 from models import db  # pyre-ignore[21]
-
-# Import Company model from the models package
 from models.company import Company  # pyre-ignore[21]
+from models.employee import Employee
+from utils.audit_logger import log_action
 
 # Try import User model (project structure can differ)
 try:
@@ -606,23 +606,26 @@ def update_branch(branch_id):
 @company_bp.route("/branches/<int:branch_id>", methods=["DELETE"])
 @token_required
 @role_required(["SUPER_ADMIN"])
-def delete_branch(branch_id):
+def deactivate_branch(branch_id):
+    """Mark a branch as INACTIVE instead of deleting."""
     guard = require_super_admin()
     if guard: return guard
-
-    if not Branch:
-        return jsonify({"success": False, "message": "Branch model not found"}), 500
 
     b = Branch.query.get(branch_id)
     if not b:
         return jsonify({"success": False, "message": "Branch not found"}), 404
 
     try:
-        db.session.delete(b)
+        b.status = "INACTIVE"
         db.session.commit()
-        return jsonify({"success": True, "message": "Branch deleted successfully"}), 200
+        
+        from utils.audit_logger import log_action
+        log_action("DEACTIVATE_BRANCH", "Branch", b.id, 200, meta={"branch_name": b.branch_name})
+        
+        return jsonify({"success": True, "message": f"Branch '{b.branch_name}' deactivated successfully"}), 200
     except Exception as e:
         db.session.rollback()
+        return jsonify({"success": False, "message": "Error deactivating branch", "error": str(e)}), 500
         return jsonify({"success": False, "message": "Server error on deletion", "error": str(e)}), 500
 
 
@@ -649,9 +652,8 @@ def toggle_branch_status(branch_id):
 @token_required
 @role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def get_branch_map():
-    # Only branches with valid lat/lng
+    # Fetch all branches for the company
     query = db.session.query(Branch, Company).join(Company, Branch.company_id == Company.id)
-    query = query.filter(Branch.latitude != None, Branch.longitude != None)
     
     if g.user.role in ['ADMIN', 'HR']:
         query = query.filter(Branch.company_id == g.user.company_id)
@@ -664,21 +666,23 @@ def get_branch_map():
     results = query.all()
     pins = []
     for b, c in results:
+        # Default to Hyderabad coordinates if missing
         lat = b.latitude if b.latitude is not None else 17.3850
         lng = b.longitude if b.longitude is not None else 78.4867
         
         pins.append({
             "branch_id": b.id,
-            "id": b.id,                     # Alias
+            "id": b.id,
             "branch_name": b.branch_name,
-            "name": b.branch_name,          # Alias
+            "name": b.branch_name,
             "company_name": c.company_name,
-            "company": c.company_name,       # Alias
+            "company": c.company_name,
             "latitude": lat,
-            "lat": lat,              # Alias
+            "lat": lat,
             "longitude": lng,
-            "lng": lng,             # Alias
-            "status": b.status
+            "lng": lng,
+            "status": b.status,
+            "address": b.address
         })
 
     return jsonify({"success": True, "data": pins}), 200
@@ -790,25 +794,39 @@ def update_company(company_id):
     allowed = [
         "company_name", "company_code", "industry", "company_size",
         "country", "state", "city_branch", "timezone",
-        "address", "phone", "email"
+        "address", "phone", "email", "status"
     ]
     for field in allowed:
-        if field in data:  # pyre-ignore
-            setattr(c, field, data[field])  # pyre-ignore
+        if field in data:
+            setattr(c, field, data[field])
+
+    # If deactivating via update, trigger cascade
+    if data.get("status") == "INACTIVE" or data.get("status") == "Inactive":
+        # 2. Cascade to Branches
+        Branch.query.filter_by(company_id=c.id).update({"status": "INACTIVE"})
+        
+        # 3. Cascade to Employees and their User accounts
+        employees = Employee.query.filter_by(company_id=c.id).all()
+        for emp in employees:
+            emp.status = "INACTIVE"
+            emp.is_active = False
+            if emp.user:
+                emp.user.status = "INACTIVE"
+                emp.user.is_active = False
 
     # If frontend sends company_Id, map it
-    if "company_Id" in data:  # pyre-ignore
-        c.company_code = (data.get("company_Id") or "").strip().upper()  # pyre-ignore
+    if "company_Id" in data:
+        c.company_code = (data.get("company_Id") or "").strip().upper()
 
-    # subdomain update is optional (only if you want)
-    if "subdomain" in data:  # pyre-ignore
-        sub = (data.get("subdomain") or "").strip().lower()  # pyre-ignore
-
+    # subdomain update is optional
+    if "subdomain" in data:
+        sub = (data.get("subdomain") or "").strip().lower()
         if sub and Company.query.filter(Company.subdomain == sub, Company.id != c.id).first():
             return jsonify({"success": False, "message": "subdomain already exists"}), 400
         c.subdomain = sub
 
     db.session.commit()
+    log_action("UPDATE_COMPANY", "Company", c.id, 200, meta={"company_name": c.company_name})
     return jsonify({"success": True, "message": "Company updated successfully"}), 200
 
 
@@ -819,7 +837,10 @@ def update_company(company_id):
 @company_bp.route("/companies/<int:company_id>", methods=["DELETE"])
 @token_required
 @role_required(["SUPER_ADMIN"])
-def delete_company(company_id):
+def deactivate_company(company_id):
+    """
+    Mark a company as INACTIVE and cascade deactivation to all its branches and employees.
+    """
     guard = require_super_admin()
     if guard:
         return guard
@@ -829,12 +850,33 @@ def delete_company(company_id):
         return jsonify({"success": False, "message": "Company not found"}), 404
 
     try:
-        db.session.delete(c)
+        # 1. Deactivate Company
+        c.status = "INACTIVE"
+        
+        # 2. Cascade to Branches
+        Branch.query.filter_by(company_id=c.id).update({"status": "INACTIVE"})
+        
+        # 3. Cascade to Employees and their User accounts
+        employees = Employee.query.filter_by(company_id=c.id).all()
+        for emp in employees:
+            emp.status = "INACTIVE"
+            emp.is_active = False
+            if emp.user:
+                emp.user.status = "INACTIVE"
+                emp.user.is_active = False
+
         db.session.commit()
-        return jsonify({"success": True, "message": "Company deleted successfully"}), 200
+        
+        from utils.audit_logger import log_action
+        log_action("DEACTIVATE_COMPANY", "Company", c.id, 200, meta={"company_name": c.company_name})
+        
+        return jsonify({
+            "success": True, 
+            "message": f"Company '{c.company_name}' and all its branches/employees have been deactivated."
+        }), 200
     except Exception as e:
         db.session.rollback()
-        return jsonify({"success": False, "message": "Server error", "error": str(e)}), 500
+        return jsonify({"success": False, "message": "Error deactivating company", "error": str(e)}), 500
 
 
 # ----------------------------

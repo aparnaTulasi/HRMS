@@ -16,6 +16,12 @@ class EmployeeDocument(db.Model):
     verified_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     verified_date = db.Column(db.DateTime)
     notes = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    status = db.Column(db.String(20), default="Active") # Active, Inactive
+    
+    last_viewed_at = db.Column(db.DateTime, nullable=True) # Last viewed by any user
+    view_count = db.Column(db.Integer, default=0) # Total number of times viewed/downloaded
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

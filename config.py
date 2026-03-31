@@ -10,7 +10,7 @@ INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
 os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY", "hrms-secret-key-change-this")
+    SECRET_KEY = os.getenv("SECRET_KEY", "hrms-super-secure-secret-key-change-this-now")
     
     # Database Configuration
     DB_USER = os.getenv("DB_USER")

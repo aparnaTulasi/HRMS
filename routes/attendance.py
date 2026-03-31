@@ -614,17 +614,19 @@ def import_attendance():
 @role_required(["EMPLOYEE", "ADMIN", "HR", "MANAGER", "SUPER_ADMIN"])
 def my_attendance():
     """
-    User can view their own attendance (Employees or Super Admins).
+    Unified view: 
+    - Employees see their own records.
+    - Admins/HR/Super Admins see all records for their scope (Common Dashboard).
     """
-    if g.user.role == 'SUPER_ADMIN':
-        sa_profile = g.user.super_admin
-        if not sa_profile:
-            return jsonify({"success": False, "message": "Super Admin profile not found"}), 404
+    if g.user.role in ['SUPER_ADMIN', 'ADMIN', 'HR']:
+        # Common Dashboard View for Admins
+        q = Attendance.query
+        if g.user.role != 'SUPER_ADMIN':
+            q = q.filter_by(company_id=g.user.company_id)
         
-        q = Attendance.query.filter_by(super_admin_id=sa_profile.id)\
-                            .order_by(Attendance.attendance_date.desc())\
-                            .limit(180)
+        q = q.order_by(Attendance.attendance_date.desc()).limit(500)
     else:
+        # Privacy View for Employees and Managers (own attendance)
         emp = Employee.query.filter_by(user_id=g.user.id, company_id=g.user.company_id).first()
         if not emp:
             return jsonify({"success": False, "message": "Employee profile not found"}), 404

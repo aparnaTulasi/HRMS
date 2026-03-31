@@ -74,7 +74,13 @@ def get_all_companies():
     if guard:
         return guard
 
-    items = Company.query.order_by(Company.id.desc()).all()
+    # Default filter: only active
+    include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
+    query = Company.query.order_by(Company.id.desc())
+    if not include_inactive:
+        query = query.filter(Company.status != 'Inactive')
+        
+    items = query.all()
     return jsonify([_to_frontend_company(c) for c in items]), 200
 
 
