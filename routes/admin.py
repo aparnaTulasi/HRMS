@@ -501,3 +501,61 @@ def _create_employee_impl():
         'email_sent': email_sent,
         'created_by': g.user.role
     }), 201
+
+@admin_bp.route("/employees/<int:emp_id>/toggle", methods=["POST"])
+@admin_bp.route("/employees/<int:emp_id>/toggle status", methods=["POST"])
+@admin_bp.route("/employees/<int:emp_id>/toggle-status", methods=["POST"])
+@token_required
+@role_required(["ADMIN", "HR", "SUPER_ADMIN"])
+def toggle_employee_status_admin(emp_id):
+    """
+    Hierarchical Status Toggle:
+    - ADMIN can toggle anyone in their company except SUPER_ADMIN.
+    - HR can toggle only MANAGER and EMPLOYEE in their company.
+    """
+    emp = Employee.query.get_or_404(emp_id)
+    target_user = User.query.get(emp.user_id) if emp.user_id else None
+    
+    if not target_user:
+        return jsonify({"success": False, "message": "Linked user account not found"}), 404
+
+    # 1. Company Check (Admin/HR must be in same company)
+    if g.user.role != 'SUPER_ADMIN' and target_user.company_id != g.user.company_id:
+        return jsonify({"success": False, "message": "Unauthorized: Employee belongs to a different company"}), 403
+
+    # 2. Hierarchy Check
+    current_role = (g.user.role or "").upper()
+    target_role = (target_user.role or "").upper()
+    
+    # Hierarchy Rules
+    if current_role == 'ADMIN':
+        if target_role == 'SUPER_ADMIN':
+            return jsonify({"success": False, "message": "Forbidden: Admin cannot toggle Super Admin status"}), 403
+            
+    elif current_role == 'HR':
+        if target_role not in ['MANAGER', 'EMPLOYEE']:
+            return jsonify({"success": False, "message": f"Forbidden: HR cannot toggle {target_role} status"}), 403
+            
+    elif current_role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
+         return jsonify({"success": False, "message": "Forbidden: Insufficient permissions"}), 403
+
+    # 3. Perform Toggle
+    current_status = (target_user.status or "ACTIVE").upper()
+    new_status = "INACTIVE" if current_status == "ACTIVE" else "ACTIVE"
+
+    target_user.status = new_status
+    # Synchronize is_active flag (handled by property in User model)
+    
+    emp.status = new_status
+    emp.is_active = (new_status == "ACTIVE")
+
+    db.session.commit()
+    
+    log_action("TOGGLE_STATUS", "Employee", emp.id, 200, 
+               meta={"name": emp.full_name, "old": current_status, "new": new_status, "by": current_role})
+
+    return jsonify({
+        "success": True,
+        "message": f"Status for {emp.full_name} changed to {new_status}",
+        "new_status": new_status
+    }), 200

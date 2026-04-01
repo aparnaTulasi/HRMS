@@ -815,3 +815,39 @@ def update_employee(emp_id):
         except:
             pass
         return jsonify({'success': False, 'message': f'Update failed: {str(e)}'}), 500
+
+@superadmin_bp.route("/employees/<int:emp_id>/toggle", methods=["POST"])
+@superadmin_bp.route("/employees/<int:emp_id>/toggle status", methods=["POST"])
+@superadmin_bp.route("/employees/<int:emp_id>/toggle-status", methods=["POST"])
+@token_required
+@role_required(["SUPER_ADMIN"])
+def toggle_employee_status_sa(emp_id):
+    """
+    Super Admin can toggle anyone.
+    """
+    emp = Employee.query.get_or_404(emp_id)
+    user = User.query.get(emp.user_id) if emp.user_id else None
+    
+    if not user:
+        return jsonify({"success": False, "message": "Linked user account not found"}), 404
+
+    current_status = (user.status or "ACTIVE").upper()
+    new_status = "INACTIVE" if current_status == "ACTIVE" else "ACTIVE"
+
+    user.status = new_status
+    # Synchronize is_active flag (handled by property in User model)
+    
+    emp.status = new_status
+    emp.is_active = (new_status == "ACTIVE")
+
+    db.session.commit()
+    
+    from utils.audit_logger import log_action
+    log_action("TOGGLE_STATUS", "Employee", emp.id, 200, 
+               meta={"name": emp.full_name, "old": current_status, "new": new_status})
+
+    return jsonify({
+        "success": True,
+        "message": f"Status for {emp.full_name} changed to {new_status}",
+        "new_status": new_status
+    }), 200

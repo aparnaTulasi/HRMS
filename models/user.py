@@ -47,6 +47,11 @@ class User(UserMixin, db.Model):
         self.otp_expiry = datetime.utcnow() + timedelta(minutes=10)
         return self.otp
 
+    @property
+    def is_active(self):
+        """Overrides UserMixin.is_active to use the status column as the source of truth."""
+        return (self.status or "").upper() == 'ACTIVE'
+
     def has_permission(self, permission_code):
         if self.role == 'SUPER_ADMIN':
             return True
