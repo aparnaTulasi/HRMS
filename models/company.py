@@ -24,6 +24,19 @@ class Company(db.Model):
     status = db.Column(db.String(50), default="Active")
     latitude = db.Column(db.Float, nullable=True)
     longitude = db.Column(db.Float, nullable=True)
+    
+    # ✅ SUBSCRIPTION & LICENSING
+    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    end_date = db.Column(db.DateTime, nullable=True)
+    max_users = db.Column(db.Integer, default=10)
+    
+    # ✅ FEATURE TOGGLES
+    has_attendance = db.Column(db.Boolean, default=True)
+    has_leave = db.Column(db.Boolean, default=True)
+    has_payroll = db.Column(db.Boolean, default=True)
+    has_performance = db.Column(db.Boolean, default=True)
+    kyc_status = db.Column(db.String(20), default='PENDING')
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

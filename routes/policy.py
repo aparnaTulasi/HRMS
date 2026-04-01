@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime
+from utils.date_utils import parse_date
 from models import db
 from models.shift import Shift, ShiftAssignment
 from models.employee import Employee
@@ -18,14 +19,7 @@ def _parse_time(t: str):
             pass
     raise ValueError("Invalid time format. Use HH:MM (example: 09:30)")
 
-def _parse_date(d: str):
-    # Accept "YYYY-MM-DD" or "DD/MM/YYYY"
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(d, fmt).date()
-        except ValueError:
-            pass
-    raise ValueError("Invalid date format. Use YYYY-MM-DD or DD/MM/YYYY")
+# _parse_date removed to use central parse_date
 
 # -----------------------------
 # 1) Create Shift
@@ -175,8 +169,8 @@ def assign_shift():
         return jsonify({"message": "Shift not found"}), 404
 
     try:
-        start_d = _parse_date(data["start_date"])
-        end_d = _parse_date(data["end_date"]) if data.get("end_date") else None
+        start_d = parse_date(data["start_date"])
+        end_d = parse_date(data["end_date"]) if data.get("end_date") else None
     except Exception as e:
         return jsonify({"message": str(e)}), 400
 

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, date, timedelta
+from utils.date_utils import parse_date
 from models import db
 from models.attendance import Attendance
 from models.hr_documents import WFHRequest
@@ -12,15 +13,7 @@ wfh_bp = Blueprint("wfh", __name__)
 
 ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR", "MANAGER"]
 
-def _parse_date(value: str) -> date:
-    if not value:
-        return None
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(value.strip(), fmt).date()
-        except ValueError:
-            continue
-    return None
+# _parse_date removed to use central parse_date
 
 @wfh_bp.route("/summary", methods=["GET"])
 @token_required
@@ -100,8 +93,8 @@ def list_wfh_requests():
 def allocate_wfh():
     data = request.get_json()
     employee_id = data.get("employee_id") # Can be string code or int ID
-    from_date = _parse_date(data.get("from_date"))
-    to_date = _parse_date(data.get("to_date"))
+    from_date = parse_date(data.get("from_date"))
+    to_date = parse_date(data.get("to_date"))
     reason = data.get("reason")
 
     if not all([employee_id, from_date, to_date]):

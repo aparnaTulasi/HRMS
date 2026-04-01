@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, g
 from datetime import datetime, date, timedelta
+from utils.date_utils import parse_date
 import csv
 import io
 
@@ -58,23 +59,7 @@ def has_attendance_permission():
 # -----------------------------
 # Helpers
 # -----------------------------
-def _parse_date(value: str) -> date:
-    """
-    Accepts:
-      - YYYY-MM-DD
-      - DD/MM/YYYY
-      - MM/DD/YYYY (if you want; can remove)
-    """
-    if not value:
-        raise ValueError("date is required")
-
-    value = value.strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    raise ValueError(f"Invalid date format: {value}")
+# _parse_date removed to use central parse_date
 
 
 def _parse_time(value: str, base_date: date) -> datetime:
@@ -204,9 +189,9 @@ def list_attendance():
 
     # Date range filter
     if from_date:
-        q = q.filter(Attendance.attendance_date >= _parse_date(from_date))
+        q = q.filter(Attendance.attendance_date >= parse_date(from_date))
     if to_date:
-        q = q.filter(Attendance.attendance_date <= _parse_date(to_date))
+        q = q.filter(Attendance.attendance_date <= parse_date(to_date))
 
     # Month filter (optional)
     if month:
@@ -319,7 +304,7 @@ def manual_attendance():
     if emp.user_id == g.user.id and g.user.role not in ['SUPER_ADMIN', 'ADMIN']:
         return jsonify({"message": "You cannot mark your own attendance manually"}), 403
 
-    d = _parse_date(att_date)
+    d = parse_date(att_date)
 
     login_at = None
     logout_at = None
@@ -767,7 +752,7 @@ def create_regularization_request():
         return jsonify({"message": "attendance_date is required"}), 400
     
     try:
-        d = _parse_date(att_date_str)
+        d = parse_date(att_date_str)
     except ValueError as e:
         return jsonify({"message": str(e)}), 400
 
@@ -932,7 +917,7 @@ def bulk_list_attendance_employees():
         return jsonify({"message": "date parameter is required"}), 400
 
     try:
-        att_date = _parse_date(att_date_str)
+        att_date = parse_date(att_date_str)
     except ValueError as e:
         return jsonify({"message": str(e)}), 400
 
@@ -995,7 +980,7 @@ def bulk_save_attendance():
         return jsonify({"message": "date and updates list are required"}), 400
 
     try:
-        att_date = _parse_date(att_date_str)
+        att_date = parse_date(att_date_str)
     except ValueError as e:
         return jsonify({"message": str(e)}), 400
 

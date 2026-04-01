@@ -1,0 +1,327 @@
+﻿.\venv\Scripts\python.exe : C:\Users\nagas\O
+neDrive\Desktop\HRMS-main\HRMS-main\test_sce
+nario_seed_v5.py:19: LegacyAPIWarning: The 
+Query.get() method is considered legacy as 
+of the 1.x series of SQLAlchemy and becomes 
+a legacy construct in 2.0. The method is 
+now available as Session.get() (deprecated 
+since: 2.0) (Background on SQLAlchemy 2.0 
+at: https://sqlalche.me/e/b8d9)
+At line:1 char:1
++ .\venv\Scripts\python.exe 
+test_scenario_seed_v5.py > seed_v5_final_ou 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: 
+    (C:\Users\nagas\...lche.me/e/b8d9):Str  
+  ing) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommand 
+   Error
+ 
+  comp = 
+Company.query.get(target_company_id)
+=== STARTING HRMS E2E TEST SCENARIO SEEDING (FOR COMPANY 1) ===
+
+Targeting Company: TEST LINE (ID: 1)
+Creating Software Engineer 'Vijay Kumar'...
+Marking attendance (including Today)...
+Creating a Pending Onboarding employee...
+Traceback (most recent call last):
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\connection_cext.py", line 772, 
+in cmd_query
+    self._cmysql.query(
+    ~~~~~~~~~~~~~~~~~~^
+        query,
+        ^^^^^^
+    ...<3 lines>...
+        query_attrs=self.query_attrs,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+_mysql_connector.MySQLInterfaceError: 
+Duplicate entry '1-new_hire@example.com' 
+for key 'users.unique_company_email'
+
+The above exception was the direct cause of 
+the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1967, in 
+_exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, 
+effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\default.py", line 952, in 
+do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\cursor_cext.py", line 353, in 
+execute
+    self._connection.cmd_query(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        
+self._stmt_partition["mappable_stmt"],
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        raw_as_string=self._raw_as_string,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\opentelemetry\context_propagation
+.py", line 97, in wrapper
+    return method(cnx, *args, **kwargs)
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\connection_cext.py", line 781, 
+in cmd_query
+    raise get_mysql_exception(
+        err.errno, msg=err.msg, 
+sqlstate=err.sqlstate
+    ) from err
+mysql.connector.errors.IntegrityError: 1062 
+(23000): Duplicate entry 
+'1-new_hire@example.com' for key 
+'users.unique_company_email'
+
+The above exception was the direct cause of 
+the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\test_scenario_seed_v5.py", 
+line 105, in <module>
+    run_test_scenario_v5()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\test_scenario_seed_v5.py", 
+line 87, in run_test_scenario_v5
+    db.session.flush()
+    ~~~~~~~~~~~~~~~~^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\scoping.py", line 924, in flush
+    return 
+self._proxied.flush(objects=objects)
+           
+~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\session.py", line 4331, in flush
+    self._flush(objects)
+    ~~~~~~~~~~~^^^^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\session.py", line 4466, in _flush
+    with util.safe_reraise():
+         ~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\util\langhelpers.py", line 121, in 
+__exit__
+    raise exc_value.with_traceback(exc_tb)
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\session.py", line 4427, in _flush
+    flush_context.execute()
+    ~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\unitofwork.py", line 466, in 
+execute
+    rec.execute(self)
+    ~~~~~~~~~~~^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\unitofwork.py", line 642, in 
+execute
+    util.preloaded.orm_persistence.save_obj(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self.mapper,
+        ^^^^^^^^^^^^
+        uow.states_for_mapper_hierarchy(self
+.mapper, False, False),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
+        uow,
+        ^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\persistence.py", line 93, in 
+save_obj
+    _emit_insert_statements(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        base_mapper,
+        ^^^^^^^^^^^^
+    ...<3 lines>...
+        insert,
+        ^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\persistence.py", line 1233, in 
+_emit_insert_statements
+    result = connection.execute(
+        statement,
+        params,
+        execution_options=execution_options,
+    )
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\sql\elements.py", line 527, in 
+_execute_on_connection
+    return 
+connection._execute_clauseelement(
+           
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, 
+execution_options
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1641, in 
+_execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1846, in 
+_execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, 
+parameters
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1986, in 
+_exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, 
+effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 2363, in 
+_handle_dbapi_exception
+    raise sqlalchemy_exception.with_tracebac
+k(exc_info[2]) from e
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1967, in 
+_exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, 
+effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\default.py", line 952, in 
+do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\cursor_cext.py", line 353, in 
+execute
+    self._connection.cmd_query(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        
+self._stmt_partition["mappable_stmt"],
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        raw_as_string=self._raw_as_string,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\opentelemetry\context_propagation
+.py", line 97, in wrapper
+    return method(cnx, *args, **kwargs)
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\connection_cext.py", line 781, 
+in cmd_query
+    raise get_mysql_exception(
+        err.errno, msg=err.msg, 
+sqlstate=err.sqlstate
+    ) from err
+sqlalchemy.exc.IntegrityError: 
+(mysql.connector.errors.IntegrityError) 
+1062 (23000): Duplicate entry 
+'1-new_hire@example.com' for key 
+'users.unique_company_email'
+[SQL: INSERT INTO users (email, username, 
+phone, password, `role`, company_id, 
+status, profile_completed, profile_locked, 
+portal_prefix, otp, otp_expiry, last_login, 
+created_at, updated_at) VALUES (%(email)s, 
+%(username)s, %(phone)s, %(password)s, 
+%(role)s, %(company_id)s, %(status)s, 
+%(profile_completed)s, %(profile_locked)s, 
+%(portal_prefix)s, %(otp)s, %(otp_expiry)s, 
+%(last_login)s, %(created_at)s, 
+%(updated_at)s)]
+[parameters: {'email': 
+'new_hire@example.com', 'username': None, 
+'phone': None, 'password': 'scrypt:32768:8:1
+$rivJXqOnlErUotj7$5878d6ebfd15d7efbb363d7b04
+dc91f93b1d275b96df4d84df624d863343f8323d87f1
+852882a698e884c1bb365cecdf46be517acb24096c31
+05fd69d0a9658f', 'role': 'EMPLOYEE', 
+'company_id': 1, 'status': 'ACTIVE', 
+'profile_completed': 0, 'profile_locked': 
+0, 'portal_prefix': None, 'otp': None, 
+'otp_expiry': None, 'last_login': None, 
+'created_at': datetime.datetime(2026, 4, 1, 
+6, 38, 27, 526929), 'updated_at': 
+datetime.datetime(2026, 4, 1, 6, 38, 27, 
+526933)}]
+(Background on this error at: 
+https://sqlalche.me/e/20/gkpj)

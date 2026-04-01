@@ -1,0 +1,299 @@
+﻿.\venv\Scripts\python.exe : C:\Users\nagas\O
+neDrive\Desktop\HRMS-main\HRMS-main\test_sce
+nario_seed_v5.py:19: LegacyAPIWarning: The 
+Query.get() method is considered legacy as 
+of the 1.x series of SQLAlchemy and becomes 
+a legacy construct in 2.0. The method is 
+now available as Session.get() (deprecated 
+since: 2.0) (Background on SQLAlchemy 2.0 
+at: https://sqlalche.me/e/b8d9)
+At line:1 char:1
++ .\venv\Scripts\python.exe 
+test_scenario_seed_v5.py > seed_v5_out.txt  
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: 
+    (C:\Users\nagas\...lche.me/e/b8d9):Str  
+  ing) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommand 
+   Error
+ 
+  comp = 
+Company.query.get(target_company_id)
+=== STARTING HRMS E2E TEST SCENARIO SEEDING (FOR COMPANY 1) ===
+
+Targeting Company: TEST LINE (ID: 1)
+Traceback (most recent call last):
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\connection_cext.py", line 772, 
+in cmd_query
+    self._cmysql.query(
+    ~~~~~~~~~~~~~~~~~~^
+        query,
+        ^^^^^^
+    ...<3 lines>...
+        query_attrs=self.query_attrs,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+_mysql_connector.MySQLInterfaceError: 
+Cannot delete or update a parent row: a 
+foreign key constraint fails 
+(`hrms_db`.`employees`, CONSTRAINT 
+`employees_ibfk_1` FOREIGN KEY (`user_id`) 
+REFERENCES `users` (`id`))
+
+The above exception was the direct cause of 
+the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1967, in 
+_exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, 
+effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\default.py", line 952, in 
+do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\cursor_cext.py", line 353, in 
+execute
+    self._connection.cmd_query(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        
+self._stmt_partition["mappable_stmt"],
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        raw_as_string=self._raw_as_string,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\opentelemetry\context_propagation
+.py", line 97, in wrapper
+    return method(cnx, *args, **kwargs)
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\connection_cext.py", line 781, 
+in cmd_query
+    raise get_mysql_exception(
+        err.errno, msg=err.msg, 
+sqlstate=err.sqlstate
+    ) from err
+mysql.connector.errors.IntegrityError: 1451 
+(23000): Cannot delete or update a parent 
+row: a foreign key constraint fails 
+(`hrms_db`.`employees`, CONSTRAINT 
+`employees_ibfk_1` FOREIGN KEY (`user_id`) 
+REFERENCES `users` (`id`))
+
+The above exception was the direct cause of 
+the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\test_scenario_seed_v5.py", 
+line 96, in <module>
+    run_test_scenario_v5()
+    ~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\test_scenario_seed_v5.py", 
+line 43, in run_test_scenario_v5
+    User.query.filter_by(email=emp_email).de
+lete()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\query.py", line 3210, in delete
+    self.session.execute(
+    ~~~~~~~~~~~~~~~~~~~~^
+        delete_,
+        ^^^^^^^^
+    ...<3 lines>...
+        ),
+        ^^
+    ),
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\session.py", line 2351, in execute
+    return self._execute_internal(
+           ~~~~~~~~~~~~~~~~~~~~~~^
+        statement,
+        ^^^^^^^^^^
+    ...<4 lines>...
+        _add_event=_add_event,
+        ^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\session.py", line 2249, in 
+_execute_internal
+    result: Result[Any] = 
+compile_state_cls.orm_execute_statement(
+                          
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self,
+        ^^^^^
+    ...<4 lines>...
+        conn,
+        ^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\bulk_persistence.py", line 2033, 
+in orm_execute_statement
+    return super().orm_execute_statement(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        session, statement, params, 
+execution_options, bind_arguments, conn
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\orm\context.py", line 306, in 
+orm_execute_statement
+    result = conn.execute(
+        statement, params or {}, 
+execution_options=execution_options
+    )
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1419, in execute
+    return meth(
+        self,
+        distilled_parameters,
+        execution_options or NO_OPTIONS,
+    )
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\sql\elements.py", line 527, in 
+_execute_on_connection
+    return 
+connection._execute_clauseelement(
+           
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        self, distilled_params, 
+execution_options
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1641, in 
+_execute_clauseelement
+    ret = self._execute_context(
+        dialect,
+    ...<8 lines>...
+        cache_hit=cache_hit,
+    )
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1846, in 
+_execute_context
+    return self._exec_single_context(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        dialect, context, statement, 
+parameters
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1986, in 
+_exec_single_context
+    self._handle_dbapi_exception(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        e, str_statement, 
+effective_parameters, cursor, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 2363, in 
+_handle_dbapi_exception
+    raise sqlalchemy_exception.with_tracebac
+k(exc_info[2]) from e
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\base.py", line 1967, in 
+_exec_single_context
+    self.dialect.do_execute(
+    ~~~~~~~~~~~~~~~~~~~~~~~^
+        cursor, str_statement, 
+effective_parameters, context
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\sqlal
+chemy\engine\default.py", line 952, in 
+do_execute
+    cursor.execute(statement, parameters)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\cursor_cext.py", line 353, in 
+execute
+    self._connection.cmd_query(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        
+self._stmt_partition["mappable_stmt"],
+        
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        raw_as_string=self._raw_as_string,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\opentelemetry\context_propagation
+.py", line 97, in wrapper
+    return method(cnx, *args, **kwargs)
+  File "C:\Users\nagas\OneDrive\Desktop\HRMS
+-main\HRMS-main\venv\Lib\site-packages\mysql
+\connector\connection_cext.py", line 781, 
+in cmd_query
+    raise get_mysql_exception(
+        err.errno, msg=err.msg, 
+sqlstate=err.sqlstate
+    ) from err
+sqlalchemy.exc.IntegrityError: 
+(mysql.connector.errors.IntegrityError) 
+1451 (23000): Cannot delete or update a 
+parent row: a foreign key constraint fails 
+(`hrms_db`.`employees`, CONSTRAINT 
+`employees_ibfk_1` FOREIGN KEY (`user_id`) 
+REFERENCES `users` (`id`))
+[SQL: DELETE FROM users WHERE users.email = 
+%(email_1)s]
+[parameters: {'email_1': 
+'vijay_test@example.com'}]
+(Background on this error at: 
+https://sqlalche.me/e/20/gkpj)

@@ -18,6 +18,7 @@ from models.designation import Designation
 from models.branch import Branch
 from models.payroll import PayGrade
 from utils.audit_logger import log_action
+from utils.date_utils import parse_date
 
 admin_bp = Blueprint('admin', __name__)
 @admin_bp.route('/employees', methods=['GET'])
@@ -156,6 +157,10 @@ def update_employee(emp_id):
         if 'password' in data and data['password']:
             from werkzeug.security import generate_password_hash
             emp.user.password = generate_password_hash(data['password'])
+            
+        role_val = data.get('role') or data.get('user_role') or data.get('userRole')
+        if role_val:
+            emp.user.role = role_val.upper()
         
         # Synchronize Status and Active flags
         if 'status' in data:
@@ -166,20 +171,23 @@ def update_employee(emp_id):
             # If deactivating via update, set is_active flags
             if new_status == 'INACTIVE':
                 emp.is_active = False
-                emp.user.is_active = False
             elif new_status == 'ACTIVE':
                 emp.is_active = True
-                emp.user.is_active = True
 
     # Update employee fields
     direct_fields = ['full_name', 'department', 'designation', 'phone_number', 'personal_email', 'pay_grade', 'employment_type', 'gender', 'company_email']
     for field in direct_fields:
-        if field in data:
-            setattr(emp, field, data[field])
+        camel_field = field.split('_')[0] + ''.join(x.title() for x in field.split('_')[1:])
+        val = data.get(field)
+        if val is None:
+            val = data.get(camel_field)
+            
+        if val is not None:
+            setattr(emp, field, val)
             
     # Complex fields
     if 'date_of_joining' in data or 'joining_date' in data:
-        emp.date_of_joining = _parse_date(data.get('date_of_joining') or data.get('joining_date'))
+        emp.date_of_joining = parse_date(data.get('date_of_joining') or data.get('joining_date'))
         
     if 'branch_id' in data:
         emp.branch_id = _resolve_branch_id(data, emp.company_id)
@@ -265,16 +273,7 @@ def get_dropdown_data():
         }
     }), 200
 
-def _parse_date(date_str):
-    """Parse date flexibly from multiple formats."""
-    if not date_str:
-        return None
-    for fmt in ('%Y-%m-%d', '%m/%d/%Y', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d', '%b %d, %Y'):
-        try:
-            return datetime.strptime(str(date_str).strip(), fmt).date()
-        except ValueError:
-            continue
-    return None
+# __parse_date_util removed to use central parse_date
 
 def _resolve_branch_id(data, company_id):
     """Resolve branch_id from branch_id or branch_name."""
@@ -436,7 +435,7 @@ def _create_employee_impl():
         full_name=full_name,
         department=data.get('department'),
         designation=data.get('designation'),
-        date_of_joining=_parse_date(data.get('date_of_joining') or data.get('joining_date')),
+        date_of_joining=parse_date(data.get('date_of_joining') or data.get('joining_date')),
         gender=data.get('gender'),
         personal_email=data.get('personal_email'),
         pay_grade=data.get('pay_grade') or 'N/A',

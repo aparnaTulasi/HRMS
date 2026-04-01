@@ -6,29 +6,159 @@ from models.attendance import Attendance
 from models.shift import ShiftAssignment, Shift
 from models.task import Task
 from models.payroll import PaySlip
+from models.company import Company
+from models.user import User
 from leave.models import LeaveRequest, LeaveBalance, Holiday
 from utils.decorators import token_required
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
 @dashboard_bp.route('/stats', methods=['GET'])
 @token_required
 def get_dashboard_stats():
-    emp = Employee.query.filter_by(user_id=g.user.id).first()
-    if not emp:
-        # Fallback for users without employee profile (e.g. Super Admin)
+    role = (g.user.role or "").upper()
+    user_id = g.user.id
+    cid = g.user.company_id
+    today = date.today()
+
+    # --- 1. SUPER ADMIN DASHBOARD ---
+    if role in ["SUPER_ADMIN", "SUPERADMIN"]:
+        total_companies = Company.query.count()
+        total_users = User.query.count()
+        active_users = User.query.filter_by(status='ACTIVE').count()
+        
+        # Module Usage
+        payroll_usage = Company.query.filter_by(has_payroll=True).count()
+        attendance_usage = Company.query.filter_by(has_attendance=True).count()
+        leave_usage = Company.query.filter_by(has_leave=True).count()
+        performance_usage = Company.query.filter_by(has_performance=True).count()
+
         return jsonify({
             "success": True,
+            "role": "SUPER_ADMIN",
             "data": {
-                "at_a_glance": {"status": "N/A", "shift": "No Shift Assigned", "in_time": "--:--", "out_time": "--:--", "logged_hours": "0h 0m"},
-                "stats": {"leave_balance": 0, "pending_leaves": 0, "action_required_tasks": 0, "next_holiday": "No upcoming holidays"}
+                "top_stats": [
+                    {"label": "Total Companies", "value": total_companies, "icon": "Business"},
+                    {"label": "Total Users", "value": total_users, "icon": "People"},
+                    {"label": "Active Today", "value": active_users, "icon": "CheckCircle"}
+                ],
+                "module_usage": [
+                    {"name": "Payroll", "count": payroll_usage},
+                    {"name": "Attendance", "count": attendance_usage},
+                    {"name": "Leave", "count": leave_usage},
+                    {"name": "Performance", "count": performance_usage}
+                ]
             }
         })
 
-    today = date.today()
-    
-    # 1. Attendance Data
+    # --- 2. MANAGER DASHBOARD ---
+    if role == "MANAGER":
+        # Get team members
+        team_members = Employee.query.filter_by(manager_id=user_id).all()
+        team_ids = [m.id for m in team_members]
+        
+        # Today's Team Attendance
+        att_counts = db.session.query(Attendance.status, func.count(Attendance.attendance_id))\
+            .filter(Attendance.employee_id.in_(team_ids), Attendance.attendance_date == today)\
+            .group_by(Attendance.status).all()
+        
+        att_dict = {status: count for status, count in att_counts}
+        
+        # Pending Approvals
+        pending_leaves = LeaveRequest.query.filter(LeaveRequest.employee_id.in_(team_ids), LeaveRequest.status == 'Pending').count()
+
+        return jsonify({
+            "success": True,
+            "role": "MANAGER",
+            "data": {
+                "team_snapshot": {
+                    "total_members": len(team_members),
+                    "present": att_dict.get("Present", 0),
+                    "absent": att_dict.get("Absent", 0),
+                    "on_leave": att_dict.get("Leave", 0) + att_dict.get("Half Day", 0),
+                    "late": att_dict.get("Late", 0)
+                },
+                "pending_actions": {
+                    "approvals": pending_leaves,
+                    "attendance_corrections": 0  # Placeholder if not implemented
+                }
+            }
+        })
+
+    # --- 3. HR DASHBOARD ---
+    if role == "HR":
+        total_emp = Employee.query.filter_by(company_id=cid).count()
+        new_hires = Employee.query.filter(Employee.company_id == cid, func.month(Employee.date_of_joining) == today.month).count()
+        
+        # Today's Org Attendance
+        leave_today = Attendance.query.filter(Attendance.company_id == cid, Attendance.attendance_date == today, Attendance.status.in_(['Leave', 'Half Day'])).count()
+
+        return jsonify({
+            "success": True,
+            "role": "HR",
+            "data": {
+                "company_health": {
+                    "total_employees": total_emp,
+                    "new_hires_month": new_hires,
+                    "on_leave_today": leave_today
+                },
+                "lifecycle": {
+                    "onboarding_pending": 0, # Placeholder
+                    "confirmation_due": 0    # Placeholder
+                }
+            }
+        })
+
+    # --- 4. ADMIN DASHBOARD ---
+    if role == "ADMIN":
+        active_emp = Employee.query.filter_by(company_id=cid, is_active=True).count()
+        late_today = Attendance.query.filter(Attendance.company_id == cid, Attendance.attendance_date == today, Attendance.status == 'Late').count()
+
+        return jsonify({
+            "success": True,
+            "role": "ADMIN",
+            "data": {
+                "operations": {
+                    "active_employees": active_emp,
+                    "attendance_issues": late_today,
+                    "system_tasks_pending": 0
+                }
+            }
+        })
+
+    # --- 5. ACCOUNTANT DASHBOARD ---
+    if role == "ACCOUNTANT":
+        # Get current month payroll summary
+        payroll_sum = db.session.query(func.sum(PaySlip.net_salary))\
+            .filter(PaySlip.company_id == cid, PaySlip.pay_month == today.month, PaySlip.pay_year == today.year).scalar() or 0
+        
+        payroll_status = "Processing" # Logic could be more complex
+
+        return jsonify({
+            "success": True,
+            "role": "ACCOUNTANT",
+            "data": {
+                "payroll_snapshot": {
+                    "total_payout": float(payroll_sum),
+                    "cycle_status": payroll_status,
+                    "pending_approvals": 0
+                }
+            }
+        })
+
+    # --- 6. DEFAULT / EMPLOYEE DASHBOARD ---
+    emp = Employee.query.filter_by(user_id=user_id).first()
+    if not emp:
+        return jsonify({
+            "success": True,
+            "role": role,
+            "data": {
+                "message": "Status N/A (No Employee Profile Found)"
+            }
+        })
+
+    # Existing Employee logic...
     att = Attendance.query.filter_by(employee_id=emp.id, attendance_date=today).first()
     status = "Absent"
     in_time = "--:--"
@@ -37,36 +167,25 @@ def get_dashboard_stats():
     
     if att:
         status = att.status
-        if att.punch_in_time:
-            in_time = att.punch_in_time.strftime("%I:%M %p")
-        if att.punch_out_time:
-            out_time = att.punch_out_time.strftime("%I:%M %p")
-        
-        # Calculate logged hours using the total_minutes property
+        if att.punch_in_time: in_time = att.punch_in_time.strftime("%I:%M %p")
+        if att.punch_out_time: out_time = att.punch_out_time.strftime("%I:%M %p")
         total_mins = att.total_minutes
         if total_mins > 0:
             h = total_mins // 60
             m = total_mins % 60
             logged_hours = f"{h}h {m}m"
 
-    # 2. Shift Data
     shift_assign = ShiftAssignment.query.filter_by(employee_id=emp.id).first()
     shift_str = "No Shift Assigned"
     if shift_assign and shift_assign.shift:
         s = shift_assign.shift
         shift_str = f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}"
 
-    # 3. Leave Data
-    # Sum up balances
     balances = LeaveBalance.query.filter_by(employee_id=emp.id).all()
     total_balance = sum([b.balance for b in balances])
-    
     pending_leaves = LeaveRequest.query.filter_by(employee_id=emp.id, status='Pending').count()
-
-    # 4. Tasks Data
     pending_tasks = Task.query.filter_by(assigned_to_employee_id=emp.id, status='Pending').count()
 
-    # 5. Next Holiday
     next_holiday_obj = Holiday.query.filter(Holiday.date >= today).order_by(Holiday.date).first()
     next_holiday_str = "No upcoming holidays"
     if next_holiday_obj:
@@ -74,6 +193,7 @@ def get_dashboard_stats():
 
     return jsonify({
         "success": True,
+        "role": "EMPLOYEE",
         "data": {
             "at_a_glance": {
                 "status": status,

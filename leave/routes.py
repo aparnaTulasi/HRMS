@@ -10,16 +10,10 @@ from models.employee import Employee
 from models.user import User
 from models.audit_log import AuditLog
 from utils.decorators import token_required, role_required
+from utils.date_utils import parse_date
 from sqlalchemy import func, case
 
-# Helper to parse date strings
-def _parse_date(date_str):
-    if not date_str:
-        return None
-    try:
-        return datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return None
+# _parse_date removed to use central parse_date
 
 # Helper to serialize model objects into dictionaries
 def serialize(model_instance):
@@ -269,12 +263,12 @@ def create_policy():
     data = request.get_json()
     if not data.get('name') or not data.get('effective_from'):
         return jsonify({'message': 'Missing required fields: name, effective_from'}), 400
-    effective_from = _parse_date(data['effective_from'])
+    effective_from = parse_date(data['effective_from'])
     if not effective_from:
         return jsonify({'message': 'Invalid effective_from date format. Use YYYY-MM-DD.'}), 400
     new_policy = LeavePolicy(
         company_id=g.user.company_id, name=data['name'], effective_from=effective_from,
-        effective_to=_parse_date(data.get('effective_to')), config_json=json.dumps(data.get('config', {}))
+        effective_to=parse_date(data.get('effective_to')), config_json=json.dumps(data.get('config', {}))
     )
     db.session.add(new_policy)
     db.session.commit()
@@ -316,7 +310,7 @@ def update_policy(id):
         policy.config_json = json.dumps(current_config)
     
     if 'effective_to' in data:
-        policy.effective_to = _parse_date(data['effective_to']) if data.get('effective_to') else None
+        policy.effective_to = parse_date(data['effective_to']) if data.get('effective_to') else None
     
     if 'is_active' in data:
         policy.is_active = data['is_active']
@@ -622,7 +616,7 @@ def add_holiday(id):
     if not data or 'date' not in data or 'name' not in data:
         return jsonify({'message': 'Missing required fields: date, name'}), 400
     
-    holiday_date = _parse_date(data['date'])
+    holiday_date = parse_date(data['date'])
     if not holiday_date:
         return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
@@ -656,7 +650,7 @@ def create_holiday_direct():
     if not calendar:
         return jsonify({'message': 'Calendar not found'}), 404
 
-    holiday_date = _parse_date(data['date'])
+    holiday_date = parse_date(data['date'])
     if not holiday_date:
         return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
 
@@ -702,7 +696,7 @@ def create_holidays_bulk():
             errors.append(f"Row {index+1}: Missing date or name")
             continue
         
-        h_date = _parse_date(item['date'])
+        h_date = parse_date(item['date'])
         if not h_date:
             errors.append(f"Row {index+1}: Invalid date format")
             continue
@@ -848,8 +842,8 @@ def recompute_balances():
     if not emp:
         return jsonify({'message': 'Employee not found'}), 404
 
-    fiscal_start = _parse_date(data['fiscal_start'])
-    fiscal_end = _parse_date(data['fiscal_end'])
+    fiscal_start = parse_date(data['fiscal_start'])
+    fiscal_end = parse_date(data['fiscal_end'])
 
     if not fiscal_start or not fiscal_end:
         return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
@@ -946,8 +940,8 @@ def calculate_leave_days():
     if not from_date_str or not to_date_str or not leave_type_id:
         return jsonify({'message': 'Missing required fields: from_date, to_date, leave_type_id'}), 400
 
-    from_date = _parse_date(from_date_str)
-    to_date = _parse_date(to_date_str)
+    from_date = parse_date(from_date_str)
+    to_date = parse_date(to_date_str)
 
     if not from_date or not to_date:
         return jsonify({'message': 'Invalid date format. Use YYYY-MM-DD.'}), 400
@@ -1039,13 +1033,13 @@ def get_ledger_history():
 
     from_date_str = request.args.get('from')
     if from_date_str:
-        from_date = _parse_date(from_date_str)
+        from_date = parse_date(from_date_str)
         if from_date:
             query = query.filter(LeaveLedger.created_at >= from_date)
 
     to_date_str = request.args.get('to')
     if to_date_str:
-        to_date = _parse_date(to_date_str)
+        to_date = parse_date(to_date_str)
         if to_date:
             # To make the 'to' date inclusive, we check for less than the next day's start
             to_datetime = datetime.combine(to_date, datetime.max.time())
@@ -1073,12 +1067,12 @@ def list_encashments():
         query = query.filter_by(leave_type_id=leave_type_id)
 
     if from_date_str:
-        from_date = _parse_date(from_date_str)
+        from_date = parse_date(from_date_str)
         if from_date:
             query = query.filter(LeaveEncashment.created_at >= from_date)
     
     if to_date_str:
-        to_date = _parse_date(to_date_str)
+        to_date = parse_date(to_date_str)
         if to_date:
             to_datetime = datetime.combine(to_date, datetime.max.time())
             query = query.filter(LeaveEncashment.created_at <= to_datetime)
@@ -1201,12 +1195,12 @@ def get_leave_summary_report():
         query = query.filter(LeaveRequest.employee_id == employee_id)
     
     if from_date_str:
-        from_date = _parse_date(from_date_str)
+        from_date = parse_date(from_date_str)
         if from_date:
             query = query.filter(LeaveRequest.to_date >= from_date)
             
     if to_date_str:
-        to_date = _parse_date(to_date_str)
+        to_date = parse_date(to_date_str)
         if to_date:
             query = query.filter(LeaveRequest.from_date <= to_date)
             
@@ -1271,12 +1265,12 @@ def get_my_leaves():
     if status:
         query = query.filter(LeaveRequest.status == status)
 
-    from_date = _parse_date(request.args.get('from'))
+    from_date = parse_date(request.args.get('from'))
     if from_date:
         # Find leaves that overlap with the date range, not just fall within it
         query = query.filter(LeaveRequest.to_date >= from_date)
 
-    to_date = _parse_date(request.args.get('to'))
+    to_date = parse_date(request.args.get('to'))
     if to_date:
         query = query.filter(LeaveRequest.from_date <= to_date)
 
@@ -1329,8 +1323,8 @@ def apply_leave():
         employee_id=emp.id, 
         company_id=data.get('company_id') if g.user.role == 'SUPER_ADMIN' and data.get('company_id') else emp.company_id,
         leave_type_id=data['leave_type_id'],
-        from_date=_parse_date(data['from_date']), 
-        to_date=_parse_date(data['to_date']),
+        from_date=parse_date(data['from_date']), 
+        to_date=parse_date(data['to_date']),
         reason=data.get('reason'),
         is_half_day=data.get('is_half_day', False),
         attachment_url=data.get('attachment_url'),
@@ -1367,8 +1361,8 @@ def manage_leave_request(id):
         if not data:
             return jsonify({'message': 'Request body is empty'}), 400
 
-        if 'from_date' in data: leave.from_date = _parse_date(data['from_date'])
-        if 'to_date' in data: leave.to_date = _parse_date(data['to_date'])
+        if 'from_date' in data: leave.from_date = parse_date(data['from_date'])
+        if 'to_date' in data: leave.to_date = parse_date(data['to_date'])
         if 'reason' in data: leave.reason = data['reason']
 
         if leave.to_date < leave.from_date:
@@ -1467,8 +1461,8 @@ def partial_leave_action(id):
     approver_id = approver_emp.id
 
     data = request.get_json()
-    approved_dates = sorted([_parse_date(d) for d in data.get('approved_dates', []) if _parse_date(d)])
-    rejected_dates = sorted([_parse_date(d) for d in data.get('rejected_dates', []) if _parse_date(d)])
+    approved_dates = sorted([parse_date(d) for d in data.get('approved_dates', []) if parse_date(d)])
+    rejected_dates = sorted([parse_date(d) for d in data.get('rejected_dates', []) if parse_date(d)])
     comment = data.get('comment', '')
 
     if not approved_dates and not rejected_dates:

@@ -7,6 +7,7 @@ import string
 from datetime import datetime, date, timedelta
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from utils.date_utils import parse_date
 
 from models import db
 from models.company import Company
@@ -18,7 +19,6 @@ from models.attendance import Attendance
 from leave.models import LeaveRequest
 from utils.decorators import token_required, role_required
 from utils.email_utils import send_login_credentials, send_account_created_alert
-import jwt
 from utils.url_generator import clean_domain, build_web_address, build_common_login_url
 
 # Additional imports for dashboard
@@ -36,14 +36,6 @@ def generate_company_code(name: str) -> str:
     suffix = ''.join(secrets.choice(string.digits) for _ in range(2))
     return f"{prefix}{suffix}"
 
-def parse_date(val):
-    if not val:
-        return None
-    try:
-        # Handles both "YYYY-MM-DD" and "YYYY-MM-DDTHH:MM:SS.sssZ"
-        return datetime.strptime(val.split('T')[0], "%Y-%m-%d").date()
-    except (ValueError, TypeError):
-        return None
 
 def _generate_employee_id(company_id):
     """Generates a new unique employee ID like 'COMPCODE-0001'."""
@@ -541,7 +533,7 @@ def _create_user_for_company(company_id: int, u: dict):
 @role_required(["SUPER_ADMIN", "ADMIN", "HR"])
 def get_dashboard_stats():
     try:
-        is_super = (g.user.role == 'SUPER_ADMIN')
+        is_super = (g.user.role.upper() == 'SUPER_ADMIN')
         cid = g.user.company_id
         
         # Base Queries
@@ -620,7 +612,7 @@ def get_dashboard_stats():
         l_items = l_pending.order_by(LeaveRequest.created_at.desc()).limit(5).all()
         for r in l_items:
             combined_pending.append({
-                "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
+                "id": r.id, "name": r.employee.full_name if r.employee and r.employee.full_name else "Unknown",
                 "type": "Leave Request", "date": r.created_at, "color": "#6366f1"
             })
             
@@ -630,7 +622,7 @@ def get_dashboard_stats():
         wfh_pending = wfh_q.order_by(WFHRequest.created_at.desc()).limit(5).all()
         for r in wfh_pending:
             combined_pending.append({
-                "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
+                "id": r.id, "name": r.employee.full_name if r.employee and r.employee.full_name else "Unknown",
                 "type": "WFH Request", "date": r.created_at, "color": "#10b981"
             })
             
@@ -640,7 +632,7 @@ def get_dashboard_stats():
         exp_pending = exp_q.order_by(TravelExpense.created_at.desc()).limit(5).all()
         for r in exp_pending:
             combined_pending.append({
-                "id": r.id, "name": r.employee.full_name if r.employee else "Unknown",
+                "id": r.id, "name": r.employee.full_name if r.employee and r.employee.full_name else "Unknown",
                 "type": "Expense Request", "date": r.created_at, "color": "#f59e0b"
             })
             
@@ -650,7 +642,7 @@ def get_dashboard_stats():
         
         for p in final_pending:
             name = p['name']
-            p['initials'] = "".join([n[0] for n in name.split() if n])[:2].upper() if name else "U"
+            p['initials'] = "".join([n[0] for n in name.split() if n])[:2].upper() if name and name != "Unknown" else "U"
             if isinstance(p['date'], datetime):
                 p['date'] = p['date'].isoformat()
 
@@ -666,7 +658,14 @@ def get_dashboard_stats():
                     "total_admins": total_admins,
                     "total_hrs": total_hrs,
                     "total_managers": total_managers,
-                    "total_employees": total_employees
+                    "total_employees": total_employees,
+                    # Fallbacks for camelCase frontend
+                    "totalCompanies": total_companies,
+                    "totalBranches": total_branches,
+                    "totalAdmins": total_admins,
+                    "totalHrs": total_hrs,
+                    "totalManagers": total_managers,
+                    "totalEmployees": total_employees
                 },
                 "departmentData": dept_data,
                 "attendanceSummary": attendance_summary,
@@ -723,3 +722,96 @@ def deactivate_employee(employee_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({"success": False, "message": "Error deactivating employee", "error": str(e)}), 500
+
+def _resolve_branch_id(data, company_id):
+    """Resolve branch_id from branch_id or branch_name."""
+    branch_id = data.get('branch_id')
+    if branch_id:
+        return int(branch_id) if str(branch_id).isdigit() else None
+    branch_name = data.get('branch_name')
+    if branch_name:
+        branch = Branch.query.filter(
+            func.lower(Branch.branch_name) == branch_name.strip().lower(),
+            Branch.company_id == company_id
+        ).first()
+        return branch.id if branch else None
+    return None
+
+@superadmin_bp.route('/employees/<int:emp_id>', methods=['PUT', 'PATCH'])
+@token_required
+@role_required(['SUPER_ADMIN'])
+def update_employee(emp_id):
+    """Update an employee's profile and user account details."""
+    emp = Employee.query.get(emp_id)
+        
+    if not emp:
+        return jsonify({'message': 'Employee not found'}), 404
+        
+    data = request.get_json(force=True) or {}
+    
+    # Update user account details if provided
+    if emp.user:
+        if 'company_email' in data:
+            emp.user.email = data['company_email'].strip().lower()
+        if 'username' in data:
+            emp.user.username = data['username'].strip()
+        if 'password' in data and data['password']:
+            from werkzeug.security import generate_password_hash
+            emp.user.password = generate_password_hash(data['password'])
+            
+        role_val = data.get('role') or data.get('user_role') or data.get('userRole')
+        if role_val:
+            emp.user.role = role_val.upper()
+        
+        # Synchronize Status and Active flags
+        if 'status' in data:
+            new_status = data['status'].upper()
+            emp.user.status = new_status
+            emp.status = new_status
+            
+            # If deactivating via update, set is_active flags
+            if new_status == 'INACTIVE':
+                emp.is_active = False
+            elif new_status == 'ACTIVE':
+                emp.is_active = True
+
+    # Update employee fields
+    direct_fields = ['full_name', 'department', 'designation', 'phone_number', 'personal_email', 'pay_grade', 'employment_type', 'gender', 'company_email']
+    for field in direct_fields:
+        camel_field = field.split('_')[0] + ''.join(x.title() for x in field.split('_')[1:])
+        val = data.get(field)
+        if val is None:
+            val = data.get(camel_field)
+            
+        if val is not None:
+            setattr(emp, field, val)
+            
+    # Complex fields
+    if 'date_of_joining' in data or 'joining_date' in data:
+        emp.date_of_joining = parse_date(data.get('date_of_joining') or data.get('joining_date'))
+        
+    if 'branch_id' in data:
+        emp.branch_id = _resolve_branch_id(data, emp.company_id)
+        
+    if 'manager_id' in data:
+        emp.manager_id = data['manager_id']
+
+    # Explicitly ignore CTC
+    if 'ctc' in data:
+        pass
+    
+    try:
+        db.session.commit()
+        from utils.audit_logger import log_action
+        log_action("UPDATE_EMPLOYEE", "Employee", emp_id, 200, meta=data)
+        return jsonify({'success': True, 'message': 'Employee updated successfully'})
+    except Exception as e:
+        db.session.rollback()
+        import traceback
+        tb = traceback.format_exc()
+        try:
+            with open('PUT_ERROR.txt', 'w') as f:
+                f.write(tb)
+        except:
+            pass
+        return jsonify({'success': False, 'message': f'Update failed: {str(e)}'}), 500

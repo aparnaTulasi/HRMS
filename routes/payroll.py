@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, send_file, g
 from models import db
 from utils.decorators import token_required
+from utils.date_utils import parse_date
 from models.payroll import (
     PayGrade, PayRole, PaySlip, PayrollChangeRequest, SalaryStructureAssignment,
     PayslipEarning, PayslipDeduction, PayslipEmployerContribution, PayslipReimbursement,
@@ -192,13 +193,7 @@ def _recalc_payslip(ps: PaySlip):
     ps.annual_ctc = round(ps.monthly_ctc * 12, 2)
 
 
-def _parse_date(value):
-    if not value:
-        return None
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except Exception:
-        return None
+# _parse_date removed to use central parse_date
 
 
 # =========================================================
@@ -470,7 +465,7 @@ def admin_create_payslip():
         if not data.get(k):
             return jsonify({"success": False, "message": f"{k} is required"}), 400
 
-    pay_date = _parse_date(data.get("pay_date"))
+    pay_date = parse_date(data.get("pay_date"))
     if data.get("pay_date") and not pay_date:
         return jsonify({"success": False, "message": "pay_date must be YYYY-MM-DD"}), 400
 
@@ -630,7 +625,7 @@ def admin_update_payslip(payslip_id):
             setattr(ps, f, int(val or 0) if f in ["total_days", "paid_days", "lwp_days"] else val)
 
     if data.get("pay_date") is not None:
-        pd = _parse_date(data.get("pay_date"))
+        pd = parse_date(data.get("pay_date"))
         if data.get("pay_date") and not pd:
             return jsonify({"success": False, "message": "pay_date must be YYYY-MM-DD"}), 400
         ps.pay_date = pd
@@ -1089,7 +1084,7 @@ def create_salary_assignment():
     if not grade_id and not struct_id:
         return jsonify({"success": False, "message": "pay_grade_id or salary_structure_id is required"}), 400
 
-    from_date = _parse_date(from_date_str)
+    from_date = parse_date(from_date_str)
     if not from_date:
         return jsonify({"success": False, "message": "Invalid from_date format (YYYY-MM-DD)"}), 400
 

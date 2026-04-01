@@ -11,7 +11,7 @@ calendar_bp = Blueprint('calendar', __name__)
 def get_events():
     try:
         # Super Admin sees all (or specific logic based on needs, maybe only their own or system wide)
-        if g.user.role == 'SUPER_ADMIN':
+        if g.user.role and g.user.role.upper() == 'SUPER_ADMIN':
             # For this scenario, maybe Super Admin sees everything or just company=1
             events = CalendarEvent.query.all()
         else:
@@ -28,7 +28,7 @@ def get_events():
 @token_required
 def create_event():
     # RBAC constraint: Only Super Admin, Admin, and HR can create
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
+    if not g.user.role or g.user.role.upper() not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return jsonify({'message': 'Unauthorized to create events'}), 403
 
     data = request.get_json()
@@ -42,7 +42,7 @@ def create_event():
             end_time=data.get('endTime'),
             type=data.get('type', 'work'),
             description=data.get('description'),
-            company_id=g.user.company_id if g.user.role != 'SUPER_ADMIN' else data.get('company_id', 1),
+            company_id=g.user.company_id if g.user.role and g.user.role.upper() != 'SUPER_ADMIN' else data.get('company_id', 1),
             created_by=g.user.id
         )
         db.session.add(new_event)
@@ -57,7 +57,7 @@ def create_event():
 @calendar_bp.route('/events/<int:id>', methods=['PUT', 'PATCH'])
 @token_required
 def update_event(id):
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
+    if not g.user.role or g.user.role.upper() not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return jsonify({'message': 'Unauthorized to edit events'}), 403
 
     data = request.get_json()
@@ -67,7 +67,7 @@ def update_event(id):
             return jsonify({'message': 'Event not found'}), 404
             
         # Security check: Ensure Admin is only editing within their company
-        if g.user.role == 'ADMIN' and event.company_id != g.user.company_id:
+        if g.user.role and g.user.role.upper() == 'ADMIN' and event.company_id != g.user.company_id:
             return jsonify({'message': 'Unauthorized to edit this event'}), 403
             
         if 'title' in data: event.title = data['title']
@@ -87,7 +87,7 @@ def update_event(id):
 @calendar_bp.route('/events/<int:id>', methods=['DELETE'])
 @token_required
 def delete_event(id):
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
+    if not g.user.role or g.user.role.upper() not in ['SUPER_ADMIN', 'ADMIN', 'HR']:
         return jsonify({'message': 'Unauthorized to delete events'}), 403
 
     try:
@@ -95,7 +95,7 @@ def delete_event(id):
         if not event:
             return jsonify({'message': 'Event not found'}), 404
             
-        if g.user.role == 'ADMIN' and event.company_id != g.user.company_id:
+        if g.user.role and g.user.role.upper() == 'ADMIN' and event.company_id != g.user.company_id:
             return jsonify({'message': 'Unauthorized to delete this event'}), 403
             
         db.session.delete(event)

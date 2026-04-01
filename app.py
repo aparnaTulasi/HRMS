@@ -29,6 +29,9 @@ from routes.attendance import attendance_bp
 from routes.attendance_features import attendance_features_bp
 from routes.documents import documents_bp
 from routes.payroll import payroll_bp
+from routes.announcement_routes import announcement_bp
+from routes.exit_routes import exit_bp
+from routes.manager import manager_bp
 from routes.user import user_bp
 from routes.policies import policies_bp
 from leave import leave_bp
@@ -96,6 +99,9 @@ app.register_blueprint(attendance_bp, url_prefix="/api/attendance")
 app.register_blueprint(attendance_features_bp) # url_prefix is defined in the blueprint
 app.register_blueprint(documents_bp, url_prefix="/api/documents")
 app.register_blueprint(payroll_bp, url_prefix="/api")
+app.register_blueprint(announcement_bp, url_prefix='/api/announcements')
+app.register_blueprint(exit_bp, url_prefix='/api/exit')
+app.register_blueprint(manager_bp, url_prefix='/api/manager')
 app.register_blueprint(user_bp, url_prefix="/api/user")
 app.register_blueprint(policies_bp, url_prefix="/api/policies")
 app.register_blueprint(leave_bp)
