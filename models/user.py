@@ -17,6 +17,7 @@ class User(UserMixin, db.Model):
     # ✅ NEW FLAGS
     profile_completed = db.Column(db.Boolean, default=False)
     profile_locked = db.Column(db.Boolean, default=False)
+    must_change_password = db.Column(db.Boolean, default=False)
 
     portal_prefix = db.Column(db.String(50), nullable=True)
     otp = db.Column(db.String(6), nullable=True)

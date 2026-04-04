@@ -55,6 +55,7 @@ from routes.access_control import access_control_bp
 from routes.training_routes import training_bp
 from routes.expense_routes import expense_bp
 from routes.dashboard_routes import dashboard_bp
+from routes.permissions import permissions_bp
 
 from models.permission import Permission, UserPermission
 from models.department import Department
@@ -125,6 +126,7 @@ app.register_blueprint(access_control_bp, url_prefix="/api/admin/access-control"
 app.register_blueprint(training_bp, url_prefix="/api/hr/training")
 app.register_blueprint(expense_bp, url_prefix="/api/expenses")
 app.register_blueprint(dashboard_bp, url_prefix="/api/dashboard")
+app.register_blueprint(permissions_bp)
 
 @app.route('/')
 def home():
