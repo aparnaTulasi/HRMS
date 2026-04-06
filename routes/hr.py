@@ -4,13 +4,14 @@ from models import db
 from models.user import User
 from models.employee import Employee
 from models.employee_onboarding_request import EmployeeOnboardingRequest
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 
 hr_bp = Blueprint('hr', __name__)
 
 @hr_bp.route('/employees', methods=['GET'])
 @token_required
-@role_required(['HR'])
+@permission_required(Permissions.EMPLOYEE_VIEW)
 def get_employees():
     employees = Employee.query.filter_by(company_id=g.user.company_id).all()
     output = []
@@ -28,7 +29,7 @@ def get_employees():
 
 @hr_bp.route('/approve-employee/<int:user_id>', methods=['POST'])
 @token_required
-@role_required(['HR'])
+@permission_required(Permissions.EMPLOYEE_STATUS_TOGGLE)
 def approve_employee(user_id):
     user = User.query.get(user_id)
     if not user:
@@ -41,7 +42,7 @@ def approve_employee(user_id):
 
 @hr_bp.route('/onboarding-request', methods=['POST'])
 @token_required
-@role_required(['HR'])
+@permission_required(Permissions.EMPLOYEE_CREATE)
 def create_onboarding_request():
     data = request.get_json(force=True)
 

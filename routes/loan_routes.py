@@ -2,7 +2,8 @@ from flask import Blueprint, jsonify, request, g
 from models import db
 from models.loan import Loan
 from models.employee import Employee
-from utils.decorators import token_required
+from utils.decorators import token_required, permission_required
+from constants.permissions_registry import Permissions
 from sqlalchemy import func
 from datetime import datetime, timedelta
 import calendar
@@ -11,10 +12,9 @@ loan_bp = Blueprint('loan', __name__)
 
 @loan_bp.route('/dashboard', methods=['GET'])
 @token_required
+@permission_required("LOAN_VIEW")
 def get_loan_dashboard():
-    # Only Admin, HR, and Super Admin can access the dashboard stats
-    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
-        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    # Only Admin, HR, and Super Admin can access the dashboard stats - handled by permission
 
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -78,9 +78,9 @@ def get_loan_dashboard():
 
 @loan_bp.route('/requests', methods=['GET'])
 @token_required
+@permission_required("LOAN_VIEW")
 def get_loan_requests():
-    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
-        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    # Role check now handled by permission decorator
 
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -127,9 +127,9 @@ def apply_loan():
 
 @loan_bp.route('/<int:loan_id>/action', methods=['PATCH'])
 @token_required
+@permission_required(Permissions.LOAN_MANAGEMENT)
 def loan_action(loan_id):
-    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
-        return jsonify({"success": False, "message": "Unauthorized"}), 403
+    # Role check now handled by permission decorator
 
     loan = Loan.query.get(loan_id)
     if not loan or loan.company_id != g.user.company_id:

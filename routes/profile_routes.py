@@ -3,6 +3,9 @@ from models import db
 from models.user import User
 from models.employee import Employee
 from models.super_admin import SuperAdmin
+from models.profile_change_request import ProfileChangeRequest
+from models.profile_change_request_item import ProfileChangeRequestItem
+from constants.profile_fields import ALLOWED_PROFILE_FIELDS, ROLE_ESCALATION, FIELD_DISPLAY_NAMES
 from utils.decorators import token_required
 from datetime import datetime
 
@@ -111,50 +114,124 @@ def update_my_profile():
     user = g.user
     data = request.get_json()
     
-    # Fields that can be updated from the profile page
-    updateable_fields = [
-        'name', 'phone', 'address', 'bio', 'emergency_contact',
-        'employee_id', 'designation', 'department'
-    ]
-    
     if user.role == 'SUPER_ADMIN':
-        sa = SuperAdmin.query.filter_by(user_id=user.id).first()
-        if not sa:
-            return jsonify({"message": "SuperAdmin record not found"}), 404
-        
-        if 'name' in data:
-            parts = data['name'].split(' ', 1)
-            sa.first_name = parts[0]
-            sa.last_name = parts[1] if len(parts) > 1 else ""
-        
-        if 'phone' in data: sa.phone_number = data['phone']
-        if 'address' in data: sa.address = data['address']
-        if 'bio' in data: sa.bio = data['bio']
-        if 'emergency_contact' in data: sa.emergency_contact = data['emergency_contact']
-        if 'designation' in data: sa.designation = data['designation']
-        if 'department' in data: sa.department = data['department']
-        
+        record = SuperAdmin.query.filter_by(user_id=user.id).first()
+        model_name = "SuperAdmin"
     else:
-        emp = Employee.query.filter_by(user_id=user.id).first()
-        if not emp:
-            return jsonify({"message": "Employee record not found"}), 404
-            
-        if 'name' in data: emp.full_name = data['name']
-        if 'phone' in data: emp.phone_number = data['phone']
-        if 'employee_id' in data: emp.employee_id = data['employee_id']
-        if 'designation' in data: emp.designation = data['designation']
-        if 'department' in data: emp.department = data['department']
-        
-        if 'address' in data:
-            # For simplicity, we assume address_line1 for now if they only provide a string
-            from models.employee_address import EmployeeAddress
-            if not emp.address:
-                emp.address = EmployeeAddress(employee_id=emp.id)
-                db.session.add(emp.address)
-            emp.address.address_line1 = data['address']
-            
-        if 'bio' in data: emp.bio = data['bio']
-        if 'emergency_contact' in data: emp.emergency_contact = data['emergency_contact']
+        record = Employee.query.filter_by(user_id=user.id).first()
+        model_name = "Employee"
 
-    db.session.commit()
-    return jsonify({"success": True, "message": "Profile updated successfully"}), 200
+    if not record:
+        return jsonify({"message": f"{model_name} record not found"}), 404
+
+    # 1. Check if profile is locked
+    is_locked = getattr(user, 'profile_locked', False)
+
+    allowed_fields = ALLOWED_PROFILE_FIELDS.get(model_name, [])
+    changes = []
+
+    # Helper for difference detection
+    def get_diffs(obj, fields, data_dict, m_name):
+        diffs = []
+        for field in fields:
+            # Map frontend keys to model keys if necessary
+            data_key = field
+            if field == 'full_name' and 'name' in data_dict: data_key = 'name'
+            if field == 'phone_number' and 'phone' in data_dict: data_key = 'phone'
+            
+            if data_key in data_dict:
+                old_val = getattr(obj, field, None)
+                new_val = data_dict[data_key]
+                
+                # Null-safe comparison
+                if str(old_val or "").strip() != str(new_val or "").strip():
+                    diffs.append({
+                        "field_key": field,
+                        "field_name": FIELD_DISPLAY_NAMES.get(field, field.replace('_', ' ').title()),
+                        "model_name": m_name,
+                        "old_value": str(old_val) if old_val is not None else None,
+                        "new_value": str(new_val) if new_val is not None else None
+                    })
+        return diffs
+
+    # Main record diffs
+    changes.extend(get_diffs(record, allowed_fields, data, model_name))
+
+    # Address diffs (if Employee)
+    if model_name == "Employee" and 'address' in data:
+        from models.employee_address import EmployeeAddress
+        addr = record.address
+        if not addr:
+            # If no address exists, we'll treat it as a change if data['address'] isn't empty
+            if data['address']:
+                changes.append({
+                    "field_key": "address_line1",
+                    "field_name": "Address Line 1",
+                    "model_name": "EmployeeAddress",
+                    "old_value": None,
+                    "new_value": data['address']
+                })
+        else:
+            changes.extend(get_diffs(addr, ALLOWED_PROFILE_FIELDS.get("EmployeeAddress", []), {"address_line1": data['address']}, "EmployeeAddress"))
+
+    if not changes:
+        return jsonify({"success": True, "message": "No changes detected"}), 200
+
+    # 2. Case A: Not Locked -> Direct Update
+    if not is_locked:
+        try:
+            for change in changes:
+                target_obj = record
+                if change['model_name'] == "EmployeeAddress":
+                    from models.employee_address import EmployeeAddress
+                    if not record.address:
+                        record.address = EmployeeAddress(employee_id=record.id)
+                        db.session.add(record.address)
+                    target_obj = record.address
+                
+                setattr(target_obj, change['field_key'], data.get('name') if change['field_key'] == 'full_name' else (data.get('phone') if change['field_key'] == 'phone_number' else change['new_value']))
+            
+            user.profile_locked = True
+            db.session.commit()
+            return jsonify({"success": True, "message": "Profile updated successfully (Initial Update)"}), 200
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"success": False, "message": str(e)}), 500
+
+    # 3. Case B: Locked -> Create Request
+    try:
+        next_approver_role = ROLE_ESCALATION.get(user.role, "HR")
+        
+        request_obj = ProfileChangeRequest(
+            company_id=user.company_id or 1,
+            requester_user_id=user.id,
+            target_user_id=user.id,
+            status="PENDING",
+            requested_by_role=user.role,
+            current_approver_role=next_approver_role,
+            flow_type=f"{user.role}_TO_{next_approver_role}",
+            reason=data.get('reason', 'Profile Correction')
+        )
+        db.session.add(request_obj)
+        db.session.flush()
+
+        for change in changes:
+            item = ProfileChangeRequestItem(
+                request_id=request_obj.id,
+                field_key=change['field_key'],
+                field_name=change['field_name'],
+                model_name=change['model_name'],
+                old_value=change['old_value'],
+                new_value=change['new_value']
+            )
+            db.session.add(item)
+        
+        db.session.commit()
+        return jsonify({
+            "success": True, 
+            "message": f"Profile correction request sent to {next_approver_role} for approval.",
+            "request_id": request_obj.id
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500

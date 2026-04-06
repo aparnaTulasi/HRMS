@@ -39,6 +39,7 @@ from routes.approvals import approvals_bp
 from routes.company import company_bp
 from routes.hr_documents import hr_docs_bp
 from routes.profile_routes import profile_bp
+from routes.profile_approval_routes import profile_approval_bp
 from routes.audit_log import audit_bp
 from routes.support import support_bp
 from routes.calendar import calendar_bp
@@ -55,6 +56,7 @@ from routes.access_control import access_control_bp
 from routes.training_routes import training_bp
 from routes.expense_routes import expense_bp
 from routes.dashboard_routes import dashboard_bp
+from routes.main_routes import main_bp
 from routes.permissions import permissions_bp
 
 from models.permission import Permission, UserPermission
@@ -67,6 +69,9 @@ from models.squad import Squad
 from models.squad_member import SquadMember
 from models.job_posting import JobPosting
 from models.job_applicant import JobApplicant
+from models.profile_change_request import ProfileChangeRequest
+from models.profile_change_request_item import ProfileChangeRequestItem
+from models.notification import Notification
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -110,6 +115,7 @@ app.register_blueprint(approvals_bp, url_prefix="/api/approvals")
 app.register_blueprint(company_bp, url_prefix="/api/superadmin") # Corrected registration and prefix
 app.register_blueprint(hr_docs_bp, url_prefix="/api/hr-docs")
 app.register_blueprint(profile_bp)
+app.register_blueprint(profile_approval_bp)
 app.register_blueprint(audit_bp)
 app.register_blueprint(support_bp, url_prefix="/api/support")
 app.register_blueprint(calendar_bp, url_prefix="/api/calendar")
@@ -126,7 +132,7 @@ app.register_blueprint(access_control_bp, url_prefix="/api/admin/access-control"
 app.register_blueprint(training_bp, url_prefix="/api/hr/training")
 app.register_blueprint(expense_bp, url_prefix="/api/expenses")
 app.register_blueprint(dashboard_bp, url_prefix="/api/dashboard")
-app.register_blueprint(permissions_bp)
+app.register_blueprint(main_bp)
 
 @app.route('/')
 def home():

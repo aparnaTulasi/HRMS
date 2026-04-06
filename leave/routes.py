@@ -9,7 +9,8 @@ from models import db
 from models.employee import Employee
 from models.user import User
 from models.audit_log import AuditLog
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 from utils.date_utils import parse_date
 from sqlalchemy import func, case
 
@@ -107,7 +108,7 @@ def health_check():
 
 @leave_bp.route('/seed/defaults', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required("REQUESTS_CREATE")
 def seed_defaults():
     # Support Super Admin seeding for specific company
     company_id = request.args.get('company_id', type=int)
@@ -191,7 +192,7 @@ def seed_defaults():
 
 @leave_bp.route('/types', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required("REQUESTS_CREATE")
 def create_leave_type():
     data = request.get_json()
     company_id = g.user.company_id
@@ -210,6 +211,7 @@ def create_leave_type():
 
 @leave_bp.route('/types', methods=['GET'])
 @token_required
+@permission_required("REQUESTS_VIEW")
 def list_leave_types():
     company_id = request.args.get('company_id')
     if g.user.role == 'SUPER_ADMIN' and company_id:
@@ -227,13 +229,14 @@ def list_leave_types():
 
 @leave_bp.route('/types/<int:id>', methods=['GET'])
 @token_required
+@permission_required("REQUESTS_VIEW")
 def get_leave_type(id):
     leave_type = LeaveType.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     return jsonify(serialize(leave_type)), 200
 
 @leave_bp.route('/types/<int:id>', methods=['PUT'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def update_leave_type(id):
     leave_type = LeaveType.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     data = request.get_json()
@@ -245,7 +248,7 @@ def update_leave_type(id):
 
 @leave_bp.route('/types/<int:id>', methods=['DELETE'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_DELETE)
 def delete_leave_type(id):
     leave_type = LeaveType.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     leave_type.is_active = False # Soft delete
@@ -258,7 +261,7 @@ def delete_leave_type(id):
 
 @leave_bp.route('/policies', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def create_policy():
     data = request.get_json()
     if not data.get('name') or not data.get('effective_from'):
@@ -288,7 +291,7 @@ def get_policy(id):
 
 @leave_bp.route('/policies/<int:id>', methods=['PUT'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def update_policy(id):
     policy = LeavePolicy.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     data = request.get_json()
@@ -323,7 +326,7 @@ def update_policy(id):
 
 @leave_bp.route('/policies/<int:id>/toggle', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def toggle_policy(id):
     policy = LeavePolicy.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     data = request.get_json()
@@ -340,7 +343,7 @@ def toggle_policy(id):
 
 @leave_bp.route('/policies/map', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def map_policy_to_leave_type():
     data = request.get_json()
     required = ['policy_id', 'leave_type_id', 'annual_allocation']
@@ -373,7 +376,7 @@ def list_policy_mappings(policy_id):
 
 @leave_bp.route('/policies/mappings/<int:mapping_id>', methods=['PUT'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def update_mapping(mapping_id):
     mapping = db.session.query(LeavePolicyMapping).join(LeavePolicy).filter(
         LeavePolicyMapping.id == mapping_id, LeavePolicy.company_id == g.user.company_id
@@ -386,7 +389,7 @@ def update_mapping(mapping_id):
 
 @leave_bp.route('/policies/mappings/<int:mapping_id>', methods=['DELETE'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_DELETE)
 def remove_mapping(mapping_id):
     mapping = db.session.query(LeavePolicyMapping).join(LeavePolicy).filter(
         LeavePolicyMapping.id == mapping_id, LeavePolicy.company_id == g.user.company_id
@@ -434,7 +437,7 @@ def get_ui_policies():
 
 @leave_bp.route('/ui-policies', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def create_ui_policy():
     data = request.get_json()
     company_id = g.user.company_id or data.get('company_id') or 1
@@ -506,7 +509,7 @@ def create_ui_policy():
 
 @leave_bp.route('/ui-policies/<int:id>', methods=['PUT'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def update_ui_policy(id):
     company_id = g.user.company_id
     data = request.get_json()
@@ -532,7 +535,7 @@ def update_ui_policy(id):
 
 @leave_bp.route('/ui-policies/<int:id>', methods=['DELETE'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_DELETE)
 def delete_ui_policy(id):
     company_id = g.user.company_id
     lt = LeaveType.query.filter_by(id=id, company_id=company_id).first_or_404()
@@ -553,7 +556,7 @@ def delete_ui_policy(id):
 
 @leave_bp.route('/holidays/calendars', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def create_holiday_calendar():
     data = request.get_json()
     if not data or 'name' not in data:
@@ -585,7 +588,7 @@ def get_holiday_calendar(id):
 
 @leave_bp.route('/holidays/calendars/<int:id>', methods=['PUT'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def update_holiday_calendar(id):
     calendar = HolidayCalendar.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     data = request.get_json()
@@ -600,7 +603,7 @@ def update_holiday_calendar(id):
 
 @leave_bp.route('/holidays/calendars/<int:id>', methods=['DELETE'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_DELETE)
 def delete_holiday_calendar(id):
     calendar = HolidayCalendar.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     db.session.delete(calendar)
@@ -609,7 +612,7 @@ def delete_holiday_calendar(id):
 
 @leave_bp.route('/holidays/calendars/<int:id>/holidays', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def add_holiday(id):
     calendar = HolidayCalendar.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     data = request.get_json()
@@ -640,7 +643,7 @@ def list_holidays(id):
 
 @leave_bp.route('/holidays', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def create_holiday_direct():
     data = request.get_json()
     if not data or 'calendar_id' not in data or 'date' not in data or 'name' not in data:
@@ -673,7 +676,7 @@ def list_all_holidays():
 
 @leave_bp.route('/holidays/bulk', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_CREATE)
 def create_holidays_bulk():
     data = request.get_json()
     if not data or 'calendar_id' not in data or 'holidays' not in data:
@@ -723,7 +726,7 @@ def create_holidays_bulk():
 
 @leave_bp.route('/holidays/assign', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def assign_holiday_calendar():
     data = request.get_json()
     if not data or 'employee_id' not in data or 'calendar_id' not in data:
@@ -806,7 +809,7 @@ def get_my_leave_balance():
 
 @leave_bp.route('/balance/<int:employee_id>', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_VIEW)
 def get_employee_leave_balance(employee_id):
     emp = Employee.query.filter_by(id=employee_id, company_id=g.user.company_id).first()
     if not emp:
@@ -832,7 +835,7 @@ def get_employee_leave_balance(employee_id):
 
 @leave_bp.route('/balance/recompute', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def recompute_balances():
     data = request.get_json()
     if not data or 'employee_id' not in data or 'fiscal_start' not in data or 'fiscal_end' not in data:
@@ -983,7 +986,7 @@ def calculate_leave_days():
 
 @leave_bp.route('/ledger/manual', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def ledger_manual():
     data = request.get_json() or {}
 
@@ -1015,7 +1018,7 @@ def ledger_manual():
 
 @leave_bp.route('/ledger', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_VIEW)
 def get_ledger_history():
     employee_id = request.args.get('employee_id', type=int)
     if not employee_id:
@@ -1051,7 +1054,7 @@ def get_ledger_history():
 
 @leave_bp.route('/encashments', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_VIEW)
 def list_encashments():
     employee_id = request.args.get('employee_id', type=int)
     leave_type_id = request.args.get('leave_type_id', type=int)
@@ -1082,7 +1085,7 @@ def list_encashments():
 
 @leave_bp.route('/encashments', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def create_encashment():
     data = request.get_json()
     required = ["employee_id", "leave_type_id", "units"]
@@ -1111,7 +1114,7 @@ def create_encashment():
 
 @leave_bp.route('/encash/manual', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def manual_encashment():
     data = request.get_json()
     required = ["employee_id", "leave_type_id", "units"]
@@ -1140,7 +1143,7 @@ def manual_encashment():
 
 @leave_bp.route('/reports/audit', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_REPORT)
 def get_leave_audit_report():
     leave_id = request.args.get('leave_id', type=int)
     if not leave_id:
@@ -1374,7 +1377,7 @@ def manage_leave_request(id):
 
 @leave_bp.route('/pending-approvals', methods=['GET'])
 @token_required
-@role_required(['HR', 'MANAGER', 'ADMIN'])
+@permission_required(Permissions.LEAVE_APPROVE)
 def get_pending_approvals():
     # Support Super Admin cross-company view
     if g.user.role == 'SUPER_ADMIN' and request.args.get('company_id'):
@@ -1411,7 +1414,7 @@ def get_pending_approvals():
 
 @leave_bp.route('/<int:id>/approve', methods=['POST'])
 @token_required
-@role_required(['HR', 'MANAGER', 'ADMIN'])
+@permission_required(Permissions.LEAVE_APPROVE)
 def approve_leave(id):
     leave = LeaveRequest.query.get_or_404(id)
     if g.user.role != 'SUPER_ADMIN' and leave.company_id != g.user.company_id:
@@ -1425,7 +1428,7 @@ def approve_leave(id):
 
 @leave_bp.route('/<int:id>/action', methods=['PUT'])
 @token_required
-@role_required(['HR', 'MANAGER', 'ADMIN'])
+@permission_required(Permissions.LEAVE_APPROVE)
 def process_leave_action(id):
     leave = LeaveRequest.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     
@@ -1448,7 +1451,7 @@ def process_leave_action(id):
 
 @leave_bp.route('/<int:id>/partial-action', methods=['POST'])
 @token_required
-@role_required(['HR', 'MANAGER', 'ADMIN'])
+@permission_required(Permissions.LEAVE_APPROVE)
 def partial_leave_action(id):
     leave = LeaveRequest.query.filter_by(id=id, company_id=g.user.company_id).first_or_404()
     
@@ -1525,7 +1528,7 @@ def get_leave_timeline(id):
 
 @leave_bp.route('/year-end/process', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.LEAVE_EDIT)
 def process_year_end():
     data = request.get_json()
     policy_id = data.get('policy_id')

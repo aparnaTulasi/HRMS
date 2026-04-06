@@ -19,11 +19,13 @@ from models.branch import Branch
 from models.payroll import PayGrade
 from utils.audit_logger import log_action
 from utils.date_utils import parse_date
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 
 admin_bp = Blueprint('admin', __name__)
 @admin_bp.route('/employees', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN', 'EMPLOYEE'])
+@permission_required(Permissions.EMPLOYEE_VIEW)
 def get_employees():
     # Default filter: only active
     include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
@@ -66,7 +68,7 @@ def get_employees():
 
 @admin_bp.route('/employees/<int:emp_id>', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN', 'EMPLOYEE'])
+@permission_required(Permissions.EMPLOYEE_VIEW)
 def get_employee(emp_id):
     if g.user.role == 'SUPER_ADMIN':
         emp = Employee.query.get(emp_id)
@@ -96,7 +98,7 @@ def get_employee(emp_id):
 
 @admin_bp.route('/employees/<int:emp_id>', methods=['DELETE'])
 @token_required
-@role_required(['ADMIN', 'SUPER_ADMIN'])
+@permission_required(Permissions.EMPLOYEE_DELETE)
 def deactivate_employee(emp_id):
     """Mark an employee and their user records as INACTIVE instead of deleting from the database."""
     try:
@@ -135,7 +137,7 @@ def deactivate_employee(emp_id):
 
 @admin_bp.route('/employees/<int:emp_id>', methods=['PUT', 'PATCH'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.EMPLOYEE_EDIT)
 def update_employee(emp_id):
     """Update an employee's profile and user account details."""
     if g.user.role == 'SUPER_ADMIN':
@@ -233,7 +235,7 @@ def generate_employee_id(company_code: str) -> str:
 
 @admin_bp.route('/dropdown-data', methods=['GET'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
+@permission_required(Permissions.EMPLOYEE_VIEW)
 def get_dropdown_data():
     company_id = g.user.company_id
     if company_id is None and g.user.role == 'SUPER_ADMIN':
@@ -294,7 +296,7 @@ def _resolve_branch_id(data, company_id):
 @admin_bp.route('/create-employee', methods=['POST'])
 @admin_bp.route('/create-hr', methods=['POST'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
+@permission_required(Permissions.EMPLOYEE_CREATE)
 def create_employee():
     try:
         return _create_employee_impl()
@@ -506,7 +508,7 @@ def _create_employee_impl():
 @admin_bp.route("/employees/<int:emp_id>/toggle status", methods=["POST"])
 @admin_bp.route("/employees/<int:emp_id>/toggle-status", methods=["POST"])
 @token_required
-@role_required(["ADMIN", "HR", "SUPER_ADMIN"])
+@permission_required(Permissions.EMPLOYEE_STATUS_TOGGLE)
 def toggle_employee_status_admin(emp_id):
     """
     Hierarchical Status Toggle:

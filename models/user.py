@@ -54,6 +54,7 @@ class User(UserMixin, db.Model):
         return (self.status or "").upper() == 'ACTIVE'
 
     def has_permission(self, permission_code):
-        if self.role == 'SUPER_ADMIN':
+        from utils.role_utils import normalize_role
+        if normalize_role(self.role) == 'SUPER_ADMIN':
             return True
         return any(p.permission_code == permission_code for p in self.permissions)

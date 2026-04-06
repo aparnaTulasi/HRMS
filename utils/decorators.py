@@ -28,12 +28,13 @@ def role_required(allowed_roles):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            user_role = (getattr(g.user, 'role', '') or '').upper()
-            allowed_upper = [r.upper() for r in allowed_roles]
+            from utils.role_utils import normalize_role
+            user_role = normalize_role(getattr(g.user, 'role', ''))
+            allowed_normalized = [normalize_role(r) for r in allowed_roles]
             
             if user_role == 'SUPER_ADMIN':
                 return f(*args, **kwargs)
-            if user_role not in allowed_upper:
+            if user_role not in allowed_normalized:
                 return jsonify({'message': 'Permission denied'}), 403
             return f(*args, **kwargs)
         return decorated_function
@@ -43,8 +44,41 @@ def permission_required(permission_code):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
+            if not g.user:
+                return jsonify({'message': 'Unauthorized'}), 401
+            
+            from utils.role_utils import normalize_role
+            if normalize_role(g.user.role) == 'SUPER_ADMIN':
+                return f(*args, **kwargs)
+
+            # Check granular permissions
             if not g.user.has_permission(permission_code):
-                return jsonify({'message': 'Insufficient permissions'}), 403
+                return jsonify({
+                    'success': False,
+                    'message': f"Insufficient permissions: Missing '{permission_code}'"
+                }), 403
             return f(*args, **kwargs)
         return decorated_function
     return decorator
+
+def validate_company_url(f):
+    @wraps(f)
+    @token_required
+    def decorated_function(username, company, *args, **kwargs):
+        from utils.url_generator import clean_username
+        from models.company import Company
+        
+        # 1. Recompute the "truth" from DB
+        actual_username = clean_username(g.user.email)
+        company_obj = Company.query.get(g.user.company_id) if g.user.company_id else None
+        actual_company = company_obj.subdomain if company_obj else None
+        
+        # 2. Compare against URL parameters
+        if username != actual_username or company != actual_company:
+            return jsonify({
+                "message": "Forbidden: URL mismatch",
+                "error": "You are not authorized to access this specific dashboard URL."
+            }), 403
+            
+        return f(username, company, *args, **kwargs)
+    return decorated_function

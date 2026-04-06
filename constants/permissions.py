@@ -22,7 +22,7 @@ MODULES = [
 ]
 
 # Action Definitions
-ACTIONS = ["VIEW", "CREATE", "EDIT", "DELETE", "EXPORT"]
+ACTIONS = ["View", "Create", "Edit", "Delete", "Export"]
 
 # Permission Code Generator
 def get_permission_code(module, action):

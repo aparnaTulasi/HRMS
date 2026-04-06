@@ -3,7 +3,8 @@ from flask import Blueprint, request, jsonify, g
 from models import db
 from models.expense import ExpenseClaim
 from models.employee import Employee
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 from utils.audit_logger import log_action
 from datetime import datetime, date, timedelta
 import sqlalchemy as sa
@@ -22,7 +23,7 @@ def _json_ok(data, message="Success"):
 
 @expense_bp.get("/stats")
 @token_required
-@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+@permission_required("TRAVEL_AND_EXPENSES_VIEW")
 def expense_stats():
     cid = _company_id()
     # 1. Total Expenses (YTD)
@@ -52,7 +53,7 @@ def expense_stats():
 
 @expense_bp.get("/trends")
 @token_required
-@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+@permission_required("TRAVEL_AND_EXPENSES_VIEW")
 def expense_trends():
     cid = _company_id()
     trend = []
@@ -76,7 +77,7 @@ def expense_trends():
 
 @expense_bp.get("/claims")
 @token_required
-@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+@permission_required("TRAVEL_AND_EXPENSES_VIEW")
 def expense_claims_list():
     items = ExpenseClaim.query.filter_by(company_id=_company_id()) \
         .order_by(ExpenseClaim.created_at.desc()).limit(20).all()
@@ -127,7 +128,7 @@ def expense_claim_submit():
 
 @expense_bp.patch("/claims/<int:cid>/action")
 @token_required
-@role_required(["HR", "ADMIN"])
+@permission_required(Permissions.EXPENSE_MANAGEMENT)
 def expense_claim_action(cid):
     payload = request.get_json()
     action = payload.get("action") # APPROVE, REJECT
@@ -155,7 +156,7 @@ def expense_claim_action(cid):
 
 @expense_bp.get("/budget-utilization")
 @token_required
-@role_required(["HR", "ADMIN", "SUPER_ADMIN"])
+@permission_required(Permissions.EXPENSE_MANAGEMENT)
 def expense_budget():
     # Mock data for UI as it depends on budgets not yet implemented
     return _json_ok([

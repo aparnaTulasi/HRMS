@@ -8,6 +8,7 @@ from datetime import datetime, date, timedelta
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from utils.date_utils import parse_date
+from utils.id_generator import generate_employee_id
 
 from models import db
 from models.company import Company
@@ -24,6 +25,8 @@ from utils.url_generator import clean_domain, build_web_address, build_common_lo
 # Additional imports for dashboard
 from models.hr_documents import WFHRequest
 from models.travel_expense import TravelExpense
+from models.permission import UserPermission
+from constants.permissions import MODULES, ACTIONS, get_permission_code
 
 superadmin_bp = Blueprint("superadmin", __name__)
 
@@ -37,26 +40,7 @@ def generate_company_code(name: str) -> str:
     return f"{prefix}{suffix}"
 
 
-def _generate_employee_id(company_id):
-    """Generates a new unique employee ID like 'COMPCODE-0001'."""
-    company = Company.query.get(company_id)
-    prefix = company.company_code if company and company.company_code else "EMP"
-
-    # Find the last employee for this company to determine the next number
-    # Query only specific columns to prevent schema mismatch errors (e.g., missing full_name column)
-    last_employee = db.session.query(Employee.id, Employee.employee_id).filter(Employee.employee_id.like(f"{prefix}-%")).order_by(db.desc(Employee.id)).first()
-    
-    if last_employee and last_employee.employee_id:
-        try:
-            last_num = int(last_employee.employee_id.split('-')[-1])
-            next_num = last_num + 1
-        except (ValueError, IndexError):
-            # Fallback: count existing employees for that company
-            next_num = Employee.query.filter_by(company_id=company_id).count() + 1
-    else:
-        # First employee
-        next_num = 1
-    return f"{prefix}-{next_num:04d}"
+# Moved to utils.id_generator.generate_employee_id
 
 
 def _get_bearer_token():
@@ -185,7 +169,7 @@ def create_admin():
         admin_emp = Employee(
             user_id=new_admin.id,
             company_id=company.id,
-            employee_id=_generate_employee_id(company.id),
+            employee_id=generate_employee_id(company.id),
             full_name=data.get("full_name"),
             personal_email=data.get("personal_email"),
             company_email=data.get("company_email"),
@@ -347,7 +331,7 @@ def create_user():
             emp = Employee(
                 user_id=target_user.id,
                 company_id=company.id,
-                employee_id=_generate_employee_id(company.id)
+                employee_id=generate_employee_id(company.id)
             )
             db.session.add(emp)
         
@@ -562,12 +546,12 @@ def get_dashboard_stats():
         colors = ['#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16']
         dept_data = []
         for i, (dept_name, count) in enumerate(departments):
-            if dept_name:
-                dept_data.append({
-                    "label": dept_name,
-                    "value": count,
-                    "color": colors[i % len(colors)]
-                })
+            label = dept_name if dept_name else "Unassigned"
+            dept_data.append({
+                "label": label,
+                "value": int(count),
+                "color": colors[i % len(colors)]
+            })
 
         # Attendance summary (for today)
         today = date.today()
@@ -646,12 +630,49 @@ def get_dashboard_stats():
             if isinstance(p['date'], datetime):
                 p['date'] = p['date'].isoformat()
 
-        user_name = g.user.name if hasattr(g.user, 'name') and g.user.name else "Administrator"
+        # System Alerts (Dynamic)
+        yesterday = today - timedelta(days=1)
+        missing_checkout_q = Attendance.query.filter(
+            Attendance.attendance_date == yesterday,
+            Attendance.punch_in_time.isnot(None),
+            Attendance.punch_out_time.is_(None)
+        )
+        if not is_super:
+            missing_checkout_q = missing_checkout_q.filter(Attendance.company_id == cid)
+        
+        missing_count = missing_checkout_q.count()
+        
+        # New Alerts logic
+        system_alerts = []
+        if missing_count > 0:
+            system_alerts.append({
+                "type": "Warning",
+                "message": f"{missing_count} Employees missed check-out yesterday.",
+                "color": "#f59e0b"
+            })
+            
+        # Add a placeholder for server status if not available
+        system_alerts.append({
+            "type": "Info",
+            "message": "System is running optimally. DB: MySQL.",
+            "color": "#10b981"
+        })
+
+        if missing_count > 5:
+            system_alerts.append({
+                "type": "Critical",
+                "message": "High number of attendance discrepancies detected.",
+                "color": "#ef4444"
+            })
+
+        user_name = g.user.name if hasattr(g.user, 'name') and g.user.name else "Super Admin"
 
         return jsonify({
             "success": True,
             "data": {
                 "user_name": user_name,
+                "userName": user_name,
+                "role": g.user.role,
                 "stats": {
                     "total_companies": total_companies,
                     "total_branches": total_branches,
@@ -659,25 +680,27 @@ def get_dashboard_stats():
                     "total_hrs": total_hrs,
                     "total_managers": total_managers,
                     "total_employees": total_employees,
-                    # Fallbacks for camelCase frontend
                     "totalCompanies": total_companies,
                     "totalBranches": total_branches,
                     "totalAdmins": total_admins,
                     "totalHrs": total_hrs,
                     "totalManagers": total_managers,
-                    "totalEmployees": total_employees
+                    "totalEmployees": total_employees,
+                    "totalUsers": User.query.count(),
+                    "activeUsers": User.query.filter_by(status='ACTIVE').count()
                 },
                 "departmentData": dept_data,
                 "attendanceSummary": attendance_summary,
                 "revenueTrend": revenue_trend,
-                "pendingRequests": final_pending
+                "pendingRequests": final_pending,
+                "systemAlerts": system_alerts,
+                "system_alerts": system_alerts,
+                "last_updated": datetime.now().isoformat()
             }
         }), 200
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({"success": False, "message": "Failed to fetch dashboard stats", "error": str(e)}), 500
-    except Exception as e:
         return jsonify({"success": False, "message": "Failed to fetch dashboard stats", "error": str(e)}), 500
 
 # ======================================================
@@ -777,6 +800,173 @@ def update_employee(emp_id):
 
     # Update employee fields
     direct_fields = ['full_name', 'department', 'designation', 'phone_number', 'personal_email', 'pay_grade', 'employment_type', 'gender', 'company_email']
+    for field in direct_fields:
+        if field in data:
+            setattr(emp, field, data[field])
+            
+    db.session.commit()
+    return jsonify({'message': 'Employee updated successfully'}), 200
+
+# ======================================================
+# ✅ 7) PERMISSIONS MANAGEMENT (Previously permissions.py)
+# ======================================================
+
+@superadmin_bp.route('/permissions/modules', methods=['GET'])
+@token_required
+def get_permission_modules():
+    """Returns list of modules and available actions to populate the UI matrix."""
+    return jsonify({
+        "success": True,
+        "data": {
+            "modules": MODULES,
+            "actions": ACTIONS
+        }
+    })
+
+@superadmin_bp.route('/invite-member-with-permissions', methods=['POST'])
+@token_required
+@role_required(["SUPER_ADMIN"])
+def invite_member_with_permissions():
+    """
+    Creates User, Employee, and assigns granular permissions.
+    Only Super Admin can access this.
+    """
+    data = request.get_json() or {}
+    
+    # Validation
+    required = ["full_name", "email", "password", "role", "company_id"]
+    missing = [f for f in required if not data.get(f)]
+    if missing:
+        return jsonify({"success": False, "message": f"Missing fields: {', '.join(missing)}"}), 400
+
+    email = data['email'].strip().lower()
+    
+    # Check: Ensure email doesn't already exist for this company (case-insensitive)
+    existing_user = User.query.filter(
+        func.lower(User.email) == email,
+        User.company_id == data['company_id']
+    ).first()
+    
+    if existing_user:
+        return jsonify({"success": False, "message": f"This email ({email}) is already registered in this company."}), 409
+
+    company = Company.query.get(data['company_id'])
+    if not company:
+        return jsonify({"success": False, "message": "Company not found"}), 404
+
+    try:
+        # 1. Create User
+        new_user = User(
+            email=email,
+            password=generate_password_hash(data['password']),
+            role=data['role'].upper(),
+            company_id=company.id,
+            status='ACTIVE'
+        )
+        db.session.add(new_user)
+        db.session.flush()
+
+        # 2. Create Employee Profile
+        emp_id = generate_employee_id(company.id)
+
+        new_employee = Employee(
+            user_id=new_user.id,
+            company_id=company.id,
+            employee_id=emp_id,
+            full_name=data['full_name'],
+            company_email=email,
+            personal_email=email,
+            branch_id=data.get('branch_id'),
+            department=data.get('department'),
+            status='ACTIVE',
+            is_active=True,
+            date_of_joining=parse_date(data.get('joining_date'))
+        )
+        db.session.add(new_employee)
+
+        # 3. Assign Permissions
+        matrix = data.get('permissions', {})
+        for module, actions in matrix.items():
+            if module in MODULES:
+                for action in actions:
+                    if action in ACTIONS:
+                        perm_code = get_permission_code(module, action)
+                        user_perm = UserPermission(
+                            user_id=new_user.id,
+                            permission_code=perm_code,
+                            granted_by=g.user.id
+                        )
+                        db.session.add(user_perm)
+
+        db.session.commit()
+        
+        # 4. Email notification (Optional, handled by existing logic usually)
+        email_sent = False
+        try:
+            web_address = build_web_address(company.subdomain)
+            login_url = build_common_login_url(company.subdomain)
+            email_sent = send_login_credentials(
+                personal_email=email,
+                company_email=email,
+                company_name=company.company_name,
+                web_address=web_address,
+                reset_url=login_url.replace("/login", "/reset-password"),
+                created_by="Super Admin",
+                full_name=data.get("full_name"),
+                password=data.get("password")
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            "success": True,
+            "message": f"Member {data['full_name']} invited successfully.",
+            "data": {
+                "user_id": new_user.id,
+                "employee_id": new_employee.employee_id,
+                "email_sent": email_sent
+            }
+        }), 201
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"success": False, "message": "Email already in use."}), 409
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@superadmin_bp.route('/user-permissions/<int:user_id>', methods=['GET'])
+@token_required
+def get_user_permissions(user_id):
+    """Fetch all permissions assigned to a specific user."""
+    user = User.query.get_or_404(user_id)
+    perms = UserPermission.query.filter_by(user_id=user_id).all()
+    
+    grouped = {}
+    for p in perms:
+        code = p.permission_code
+        for module in MODULES:
+            clean_module = module.upper().replace(" ", "_").replace("&", "AND")
+            if code.startswith(clean_module + "_"):
+                raw_action = code.replace(clean_module + "_", "")
+                matched_action = raw_action
+                for a in ACTIONS:
+                    if a.upper() == raw_action:
+                        matched_action = a
+                        break
+                if module not in grouped: grouped[module] = []
+                grouped[module].append(matched_action)
+                break
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "user_id": user_id,
+            "email": user.email,
+            "role": user.role,
+            "permissions": grouped
+        }
+    })
     for field in direct_fields:
         camel_field = field.split('_')[0] + ''.join(x.title() for x in field.split('_')[1:])
         val = data.get(field)

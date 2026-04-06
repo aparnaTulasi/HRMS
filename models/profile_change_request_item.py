@@ -8,6 +8,8 @@ class ProfileChangeRequestItem(db.Model):
 
     # ✅ UI key must be same (no mismatch)
     field_key = db.Column(db.String(100), nullable=False)
+    field_name = db.Column(db.String(100)) # Human readable name
+    model_name = db.Column(db.String(100)) # e.g. Employee, EmployeeAddress
 
     old_value = db.Column(db.Text, nullable=True)
     new_value = db.Column(db.Text, nullable=True)

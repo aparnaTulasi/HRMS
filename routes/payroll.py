@@ -5,7 +5,8 @@ from typing import cast, Any, Dict, List
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, send_file, g
 from models import db
-from utils.decorators import token_required
+from utils.decorators import token_required, permission_required
+from constants.permissions_registry import Permissions
 from utils.date_utils import parse_date
 from models.payroll import (
     PayGrade, PayRole, PaySlip, PayrollChangeRequest, SalaryStructureAssignment,
@@ -28,17 +29,6 @@ payroll_bp = Blueprint("payroll_bp", __name__)
 # -------------------------
 # RBAC (Adapted for JWT/g.user)
 # -------------------------
-def require_roles(*roles):
-    def decorator(fn):
-        @token_required
-        def wrapper(*args, **kwargs):
-            role = getattr(g.user, "role", None)
-            if role not in roles:
-                return jsonify({"success": False, "message": "Forbidden"}), 403
-            return fn(*args, **kwargs)
-        wrapper.__name__ = fn.__name__
-        return wrapper
-    return decorator
 
 
 def _company_id():
@@ -200,7 +190,7 @@ def _recalc_payslip(ps: PaySlip):
 # SUPER ADMIN - PAY GRADE (VIEW + PDF ONLY)
 # =========================================================
 @payroll_bp.get("/superadmin/paygrades")
-@require_roles("SUPER_ADMIN", "HR")
+@permission_required("PAYROLL_VIEW")
 def superadmin_list_paygrades():
     cid = _company_id()
     rows = PayGrade.query.filter_by(company_id=cid, status="ACTIVE").order_by(PayGrade.id.desc()).all()
@@ -208,7 +198,7 @@ def superadmin_list_paygrades():
 
 
 @payroll_bp.get("/superadmin/paygrades/pdf")
-@require_roles("SUPER_ADMIN", "HR")
+@permission_required("PAYROLL_EXPORT")
 def superadmin_paygrades_pdf():
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
@@ -258,7 +248,7 @@ def superadmin_paygrades_pdf():
 # ACCOUNT - PAYGRADE (CRUD + PDF)
 # =========================================================
 @payroll_bp.get("/account/paygrades")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def account_list_paygrades():
     cid = _company_id()
     rows = PayGrade.query.filter_by(company_id=cid, status="ACTIVE").order_by(PayGrade.id.desc()).all()
@@ -266,7 +256,7 @@ def account_list_paygrades():
 
 
 @payroll_bp.post("/account/paygrades")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def account_create_paygrade():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -300,7 +290,7 @@ def account_create_paygrade():
 
 
 @payroll_bp.put("/account/paygrades/<int:paygrade_id>")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def account_update_paygrade(paygrade_id):
     cid = _company_id()
     row = PayGrade.query.filter_by(id=paygrade_id, company_id=cid, status="ACTIVE").first()
@@ -328,7 +318,7 @@ def account_update_paygrade(paygrade_id):
 
 
 @payroll_bp.delete("/account/paygrades/<int:paygrade_id>")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def account_delete_paygrade(paygrade_id):
     cid = _company_id()
     row = PayGrade.query.filter_by(id=paygrade_id, company_id=cid, status="ACTIVE").first()
@@ -340,7 +330,7 @@ def account_delete_paygrade(paygrade_id):
 
 
 @payroll_bp.get("/account/paygrades/pdf")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def account_paygrades_pdf():
     # reuse superadmin pdf function output
     return superadmin_paygrades_pdf()
@@ -350,7 +340,7 @@ def account_paygrades_pdf():
 # ACCOUNT - PAY ROLES (CRUD)
 # =========================================================
 @payroll_bp.get("/account/payroles")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def account_list_payroles():
     cid = _company_id()
     rows = PayRole.query.filter_by(company_id=cid, status="ACTIVE").order_by(PayRole.id.desc()).all()
@@ -358,7 +348,7 @@ def account_list_payroles():
 
 
 @payroll_bp.post("/account/payroles")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def account_create_payrole():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -388,7 +378,7 @@ def account_create_payrole():
 
 
 @payroll_bp.put("/account/payroles/<int:payrole_id>")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def account_update_payrole(payrole_id):
     cid = _company_id()
     row = PayRole.query.filter_by(id=payrole_id, company_id=cid, status="ACTIVE").first()
@@ -410,7 +400,7 @@ def account_update_payrole(payrole_id):
 
 
 @payroll_bp.delete("/account/payroles/<int:payrole_id>")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def account_delete_payrole(payrole_id):
     cid = _company_id()
     row = PayRole.query.filter_by(id=payrole_id, company_id=cid, status="ACTIVE").first()
@@ -425,7 +415,7 @@ def account_delete_payrole(payrole_id):
 # ADMIN - PAY SLIP (CRUD + PDF)
 # =========================================================
 @payroll_bp.get("/admin/payslips")
-@require_roles("ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def admin_list_payslips():
     cid = _company_id()
     user_role = getattr(g.user, "role", "EMPLOYEE")
@@ -456,7 +446,7 @@ def admin_list_payslips():
 
 
 @payroll_bp.post("/admin/payslips")
-@require_roles("ADMIN")
+@permission_required(Permissions.PAYROLL_CREATE)
 def admin_create_payslip():
     cid = _company_id()
     data: dict = request.get_json(silent=True) or {}
@@ -521,7 +511,7 @@ def admin_create_payslip():
 
 
 @payroll_bp.post("/admin/payslips/generate")
-@require_roles("ADMIN")
+@permission_required(Permissions.PAYROLL_GENERATE)
 def admin_generate_payslip():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -591,7 +581,7 @@ def admin_generate_payslip():
 
 
 @payroll_bp.get("/admin/payslips/<int:payslip_id>")
-@require_roles("ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def admin_get_payslip(payslip_id):
     cid = _company_id()
     user_role = getattr(g.user, "role", "EMPLOYEE")
@@ -609,7 +599,7 @@ def admin_get_payslip(payslip_id):
 
 
 @payroll_bp.put("/admin/payslips/<int:payslip_id>")
-@require_roles("ADMIN")
+@permission_required(Permissions.PAYROLL_EDIT)
 def admin_update_payslip(payslip_id):
     cid = _company_id()
     ps = PaySlip.query.filter_by(id=payslip_id, company_id=cid, status="ACTIVE").first()
@@ -677,7 +667,7 @@ def admin_update_payslip(payslip_id):
 
 
 @payroll_bp.delete("/admin/payslips/<int:payslip_id>")
-@require_roles("ADMIN")
+@permission_required(Permissions.PAYROLL_EDIT)
 def admin_delete_payslip(payslip_id):
     cid = _company_id()
     ps = PaySlip.query.filter_by(id=payslip_id, company_id=cid, status="ACTIVE").first()
@@ -693,28 +683,28 @@ def admin_delete_payslip(payslip_id):
 # ACCOUNT - PAY SLIP (optional: allow ACCOUNT to manage too)
 # =========================================================
 @payroll_bp.get("/account/payslips")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def account_list_payslips():
     # same as admin list
     return admin_list_payslips()
 
 
 @payroll_bp.post("/account/payslips")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def account_create_payslip():
     # same as admin create
     return admin_create_payslip()
 
 
 @payroll_bp.put("/account/payslips/<int:payslip_id>")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def account_update_payslip(payslip_id):
     # same as admin update
     return admin_update_payslip(payslip_id)
 
 
 @payroll_bp.delete("/account/payslips/<int:payslip_id>")
-@require_roles("ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def account_delete_payslip(payslip_id):
     # same as admin delete
     return admin_delete_payslip(payslip_id)
@@ -725,7 +715,8 @@ def account_delete_payslip(payslip_id):
 # NOTE: your User should have employee_id OR use current_user.id
 # =========================================================
 @payroll_bp.get("/employee/payslips")
-@require_roles("EMPLOYEE")
+@token_required
+@permission_required("PAYROLL_VIEW")
 def employee_list_my_payslips():
     cid = _company_id()
     # Try to get employee_id from user object, or fallback to user.id if linked
@@ -743,7 +734,6 @@ def employee_list_my_payslips():
 
 
 @payroll_bp.get("/employee/payslips/<int:payslip_id>")
-@require_roles("EMPLOYEE")
 def employee_get_my_payslip(payslip_id):
     cid = _company_id()
     emp_id = None
@@ -767,7 +757,7 @@ def employee_get_my_payslip(payslip_id):
 # PDF - for Admin + Employee + Account (same layout)
 # =========================================================
 @payroll_bp.get("/admin/payslips/<int:payslip_id>/pdf")
-@require_roles("ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def admin_payslip_pdf(payslip_id):
     cid = _company_id()
     user_role = getattr(g.user, "role", "EMPLOYEE")
@@ -784,7 +774,7 @@ def admin_payslip_pdf(payslip_id):
 
 
 @payroll_bp.get("/account/payslips/<int:payslip_id>/pdf")
-@require_roles("ACCOUNT")
+@permission_required(Permissions.PAYROLL_VIEW)
 def account_payslip_pdf(payslip_id):
     cid = _company_id()
     ps = PaySlip.query.filter_by(id=payslip_id, company_id=cid, status="ACTIVE").first()
@@ -794,7 +784,8 @@ def account_payslip_pdf(payslip_id):
 
 
 @payroll_bp.get("/employee/payslips/<int:payslip_id>/pdf")
-@require_roles("EMPLOYEE")
+@token_required
+@permission_required("PAYROLL_EXPORT")
 def employee_payslip_pdf(payslip_id):
     cid = _company_id()
     emp_id = None
@@ -894,7 +885,7 @@ def _generate_payslip_pdf(ps: PaySlip, download_name: str):
 # OPTIONAL: ACCOUNT - SEND CHANGE REQUESTS
 # =========================================================
 @payroll_bp.post("/account/payroll/requests")
-@require_roles("ACCOUNT")
+@permission_required(Permissions.PAYROLL_CREATE)
 def account_create_payroll_request():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -924,7 +915,7 @@ def account_create_payroll_request():
 
 
 @payroll_bp.get("/superadmin/payroll/requests")
-@require_roles("SUPER_ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def superadmin_list_requests():
     cid = _company_id()
     user_role = getattr(g.user, "role", "EMPLOYEE")
@@ -941,7 +932,7 @@ def superadmin_list_requests():
 
 
 @payroll_bp.get("/admin/payroll/requests")
-@require_roles("ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def admin_list_requests():
     cid = _company_id()
     # reuse superadmin logic
@@ -949,7 +940,7 @@ def admin_list_requests():
 
 
 @payroll_bp.post("/superadmin/payroll/requests/<int:req_id>/approve")
-@require_roles("SUPER_ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def superadmin_approve_request(req_id):
     # Superadmin typically approves paygrade/payrole requests
     cid = _company_id()
@@ -972,7 +963,7 @@ def superadmin_approve_request(req_id):
 
 
 @payroll_bp.post("/admin/payroll/requests/<int:req_id>/approve")
-@require_roles("ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def admin_approve_request(req_id):
     # Admin typically approves payslip requests
     cid = _company_id()
@@ -1047,7 +1038,7 @@ def _apply_request(req_row: PayrollChangeRequest):
 # SALARY STRUCTURE ASSIGNMENT (Super Admin / Admin / Account)
 # =========================================================
 @payroll_bp.get("/superadmin/salary-assignments")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_salary_assignments():
     cid = _company_id()
     user_role = getattr(g.user, "role", "EMPLOYEE")
@@ -1062,7 +1053,7 @@ def list_salary_assignments():
 
 
 @payroll_bp.post("/superadmin/salary-assignments")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT")
+@permission_required(Permissions.PAYROLL_CREATE)
 def create_salary_assignment():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1110,14 +1101,14 @@ def create_salary_assignment():
 # SALARY COMPONENTS (NEW)
 # =========================================================
 @payroll_bp.get("/superadmin/payroll/components")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_salary_components():
     cid = _company_id()
     rows = SalaryComponent.query.filter_by(company_id=cid, status="ACTIVE").all()
     return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
 
 @payroll_bp.post("/superadmin/payroll/components")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def create_salary_component():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1144,7 +1135,7 @@ def create_salary_component():
     return jsonify({"success": True, "data": comp.to_dict()}), 201
 
 @payroll_bp.delete("/superadmin/payroll/components/<int:comp_id>")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def delete_salary_component(comp_id):
     cid = _company_id()
     comp = SalaryComponent.query.filter_by(id=comp_id, company_id=cid).first()
@@ -1158,14 +1149,14 @@ def delete_salary_component(comp_id):
 # SALARY STRUCTURES (NEW)
 # =========================================================
 @payroll_bp.get("/superadmin/payroll/structures")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_salary_structures():
     cid = _company_id()
     rows = SalaryStructure.query.filter_by(company_id=cid, status="ACTIVE").all()
     return jsonify({"success": True, "data": [r.to_dict() for r in rows]}), 200
 
 @payroll_bp.post("/superadmin/payroll/structures")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def create_salary_structure():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1200,7 +1191,7 @@ def create_salary_structure():
 # STATUTORY SETTINGS (NEW)
 # =========================================================
 @payroll_bp.get("/superadmin/payroll/statutory")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_statutory_settings():
     cid = _company_id()
     st = StatutorySettings.query.filter_by(company_id=cid).first()
@@ -1211,7 +1202,7 @@ def get_statutory_settings():
     return jsonify({"success": True, "data": st.to_dict()}), 200
 
 @payroll_bp.put("/superadmin/payroll/statutory")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_EDIT)
 def update_statutory_settings():
     cid = _company_id()
     st = StatutorySettings.query.filter_by(company_id=cid).first()
@@ -1237,7 +1228,7 @@ def update_statutory_settings():
 # UPDATED HELPERS
 # =========================================================
 @payroll_bp.get("/superadmin/employees-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_employees_dropdown():
     cid = _company_id()
     user_role = getattr(g.user, "role", "EMPLOYEE")
@@ -1252,7 +1243,7 @@ def list_employees_dropdown():
 
 
 @payroll_bp.get("/superadmin/paygrades-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_paygrades_dropdown():
     cid = _company_id()
     rows = PayGrade.query.filter_by(company_id=cid, status="ACTIVE").all()
@@ -1260,7 +1251,7 @@ def list_paygrades_dropdown():
     return jsonify({"success": True, "data": data}), 200
 
 @payroll_bp.get("/superadmin/structures-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_structures_dropdown():
     cid = _company_id()
     rows = SalaryStructure.query.filter_by(company_id=cid, status="ACTIVE").all()
@@ -1268,7 +1259,7 @@ def list_structures_dropdown():
     return jsonify({"success": True, "data": data}), 200
 
 @payroll_bp.get("/superadmin/components-dropdown")
-@require_roles("SUPER_ADMIN", "ADMIN", "ACCOUNT", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_components_dropdown():
     cid = _company_id()
     rows = SalaryComponent.query.filter_by(company_id=cid, status="ACTIVE").all()
@@ -1280,7 +1271,7 @@ def list_components_dropdown():
 # =========================================================
 
 @payroll_bp.route("/payroll/form16", methods=["GET"])
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_form16():
     emp_id = request.args.get("employee_id")
     fy = request.args.get("fy")
@@ -1298,7 +1289,7 @@ def get_form16():
     return jsonify({"success": True, "data": record.to_dict()}), 200
 
 @payroll_bp.route("/payroll/form16", methods=["POST"])
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def save_form16():
     data = request.get_json(silent=True) or {}
     cid = _company_id()
@@ -1334,7 +1325,7 @@ def save_form16():
 # =========================================================
 
 @payroll_bp.route("/payroll/fnf", methods=["GET"])
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_fnf():
     cid = _company_id()
     emp_id = request.args.get("employee_id")
@@ -1350,7 +1341,7 @@ def get_fnf():
     return jsonify({"success": True, "data": [r.to_dict() for r in records]}), 200
 
 @payroll_bp.route("/payroll/fnf", methods=["POST"])
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def save_fnf():
     data = request.get_json(silent=True) or {}
     cid = _company_id()
@@ -1393,7 +1384,7 @@ def save_fnf():
     return jsonify({"success": True, "message": "F&F record saved successfully", "data": record.to_dict()}), 200
 @payroll_bp.get("/payroll/reports/salary-register")
 @token_required
-@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_salary_register():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1453,7 +1444,7 @@ def get_salary_register():
     }), 200
 
 @payroll_bp.get("/payroll/reports/income-tax")
-@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_income_tax_report():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1514,7 +1505,7 @@ def get_income_tax_report():
     return jsonify({"success": True, "data": report_data, "period": f"{calendar.month_name[month]} {year}"}), 200
 
 @payroll_bp.get("/payroll/reports/professional-tax")
-@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_professional_tax_report():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1558,7 +1549,7 @@ def get_professional_tax_report():
     return jsonify({"success": True, "data": report_data, "period": f"{calendar.month_name[month]} {year}"}), 200
 
 @payroll_bp.get("/payroll/reports/general-ledger")
-@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_general_ledger_report():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1605,7 +1596,7 @@ def get_general_ledger_report():
     return jsonify({"success": True, "data": data, "period": f"{calendar.month_name[month]} {year}"}), 200
 
 @payroll_bp.get("/payroll/reports/accounts-payable")
-@require_roles("ADMIN", "HR", "SUPER_ADMIN")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_accounts_payable_report():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1645,7 +1636,7 @@ def get_accounts_payable_report():
     return jsonify({"success": True, "data": data, "period": f"{calendar.month_name[month]} {year}"}), 200
 
 @payroll_bp.get("/admin/payroll/dashboard")
-@require_roles("ADMIN", "SUPER_ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def get_payroll_dashboard():
     cid = _company_id()
     month = request.args.get("month", type=int)
@@ -1760,7 +1751,7 @@ def get_payroll_dashboard():
 
 @payroll_bp.get("/payroll/employees")
 @token_required
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_payroll_employees():
     cid = _company_id()
     if not cid:
@@ -1787,7 +1778,7 @@ def list_payroll_employees():
     }), 200
 
 @payroll_bp.post("/payroll/letters")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_CREATE)
 def create_payroll_letter():
     cid = _company_id()
     data = request.get_json(silent=True) or {}
@@ -1816,7 +1807,7 @@ def create_payroll_letter():
     return jsonify({"success": True, "data": letter.to_dict()}), 201
 
 @payroll_bp.get("/payroll/letters")
-@require_roles("SUPER_ADMIN", "ADMIN", "HR")
+@permission_required(Permissions.PAYROLL_VIEW)
 def list_payroll_letters():
     cid = _company_id()
     letters = PayrollLetter.query.filter_by(company_id=cid).order_by(PayrollLetter.created_at.desc()).all()

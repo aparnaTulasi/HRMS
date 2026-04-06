@@ -5,7 +5,8 @@ from . import leave_bp
 from .models import LeaveType, LeavePolicy, LeavePolicyMapping, LeaveRequest, LeaveBalance, LeaveLedger
 from models import db
 from models.employee import Employee
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 
 # ==============================================================================
 # Dashboard & Management Control APIs
@@ -13,7 +14,7 @@ from utils.decorators import token_required, role_required
 
 @leave_bp.route('/dashboard/summary', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'MANAGER'])
+@permission_required(Permissions.LEAVE_VIEW)
 def get_leave_dashboard_summary():
     company_id = g.user.company_id
     
@@ -81,7 +82,7 @@ def get_leave_dashboard_summary():
 
 @leave_bp.route('/dashboard/trends', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'MANAGER'])
+@permission_required(Permissions.LEAVE_VIEW)
 def get_leave_dashboard_trends():
     company_id = g.user.company_id
     current_year = datetime.utcnow().year
@@ -111,7 +112,7 @@ def get_leave_dashboard_trends():
 
 @leave_bp.route('/dashboard/recent', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'MANAGER'])
+@permission_required(Permissions.LEAVE_VIEW)
 def get_leave_dashboard_recent():
     company_id = g.user.company_id
     recent_requests = db.session.query(LeaveRequest, Employee, LeaveType).filter(
@@ -135,7 +136,7 @@ def get_leave_dashboard_recent():
 
 @leave_bp.route('/bulk-action', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR', 'MANAGER'])
+@permission_required(Permissions.LEAVE_APPROVE)
 def leave_bulk_action():
     data = request.get_json()
     ids = data.get('ids', [])

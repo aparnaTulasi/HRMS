@@ -11,16 +11,19 @@ class ProfileChangeRequest(db.Model):
     target_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
 
     status = db.Column(db.String(20), default='PENDING')  
-    # PENDING -> APPROVED -> REJECTED -> APPLIED
+    # PENDING -> APPROVED -> REJECTED -> ESCALATED -> APPLIED
 
-    # ✅ New Flow Fields
+    # ✅ Workflow Fields
+    requested_by_role = db.Column(db.String(50))
+    current_approver_role = db.Column(db.String(50))
+    
     flow_type = db.Column(db.String(50), nullable=False) # EMP_TO_HR, HR_TO_SA, SA_TO_ROOT
-    approver_role = db.Column(db.String(50), nullable=False) # MANAGER/HR_MANAGER, SUPER_ADMIN, ROOT_ADMIN
     approver_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True) # Specific approver
 
     reason = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     decided_at = db.Column(db.DateTime, nullable=True)
     applied_at = db.Column(db.DateTime, nullable=True)
 

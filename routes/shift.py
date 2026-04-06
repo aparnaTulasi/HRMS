@@ -1,13 +1,15 @@
 from flask import Blueprint, request, jsonify, g
 from models import db
 from models.shift import Shift, ShiftAssignment
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 from datetime import datetime
 
 shift_bp = Blueprint('shift', __name__)
 
 @shift_bp.route('/', methods=['GET'])
 @token_required
+@permission_required(Permissions.SHIFT_MANAGEMENT)
 def get_shifts():
     shifts = Shift.query.filter_by(company_id=g.user.company_id).all()
     output = []
@@ -24,12 +26,13 @@ def get_shifts():
 
 @shift_bp.route('/', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR'])
+@permission_required(Permissions.SHIFT_MANAGEMENT)
 def create_shift():
     data = request.get_json()
     try:
         start_time = datetime.strptime(data['start_time'], '%H:%M').time()
         end_time = datetime.strptime(data['end_time'], '%H:%M').time()
+    # Permission check now handled by decorator
     except ValueError:
         return jsonify({'message': 'Invalid time format. Use HH:MM'}), 400
 

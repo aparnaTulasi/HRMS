@@ -9,6 +9,7 @@ from models.user import User
 from models.super_admin import SuperAdmin
 from models.employee import Employee
 from models.company import Company
+from models.permission import UserPermission
 from utils.email_utils import send_account_created_alert, send_login_credentials, send_signup_otp, send_password_reset_otp
 from utils.url_generator import build_company_base_url
 from utils.audit_logger import log_action
@@ -269,7 +270,7 @@ def login():
 
     employee = Employee.query.filter_by(user_id=user.id).first()
 
-    token = jwt.encode({
+    access_token = jwt.encode({
         'user_id': user.id,
         'role': user.role,
         'company_id': user.company_id,
@@ -280,34 +281,37 @@ def login():
     g.user = user
     log_action("LOGIN", "User", user.id, 200)
 
-    user_data = {
-        'id': user.id,
-        'email': user.email,
-        'role': user.role,
-        'status': user.status,
-        'name': user.name,
-        'company_id': user.company_id,
-        'company_name': company.company_name if company else None,
-    }
-
-    # Determine Redirect URL
+    from utils.url_generator import clean_username, build_company_base_url
+    
+    # 1. Re-fetch company if not present (for SUPER_ADMIN)
+    if not company and user.company_id:
+        company = Company.query.get(user.company_id)
+    
+    # 2. Extract URL parameters
+    username_slug = clean_username(user.email)
+    company_slug = company.subdomain if company else "system" # fallback for SuperAdmin without company
+    
+    # 3. Create role-based path (Internal switch)
+    redirect_path = f"/{username_slug}/{company_slug}/dashboard"
     base_url = build_company_base_url("")
-    
-    role_paths = {
-        "SUPER_ADMIN": "/super-admin/dashboard",
-        "ADMIN": "/admin/dashboard",
-        "HR": "/hr/dashboard",
-        "EMPLOYEE": "/employee/dashboard",
-        "MANAGER": "/employee/dashboard"
-    }
-    
-    path = role_paths.get(user.role, "/dashboard")
-    redirect_url = f"{base_url}{path}"
+    redirect_url = f"{base_url}{redirect_path}"
 
     return jsonify({
-        'token': token,
-        'user': user_data,
-        'redirect_url': redirect_url
+        'access_token': access_token, 
+        'user': {
+            'id': user.id,
+            'email': user.email,
+            'role': user.role,
+            'username': username_slug,
+            'company': company_slug,
+            'name': user.name,
+            'company_id': user.company_id,
+            'company_name': company.company_name if company else "System",
+            'permissions': [p.permission_code for p in UserPermission.query.filter_by(user_id=user.id).all()]
+        },
+        'redirect_url': redirect_url,
+        'token': access_token,
+        'access_token': access_token
     })
 
 @auth_bp.route('/me', methods=['GET'])
@@ -328,6 +332,7 @@ def get_current_user():
         'name': user.name,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None,
+        'permissions': [p.permission_code for p in UserPermission.query.filter_by(user_id=user.id).all()]
     }
 
     return jsonify(user_data), 200
@@ -391,7 +396,8 @@ def verify_reset_otp():
 
     return jsonify({
         'message': 'OTP verified successfully',
-        'reset_token': reset_token
+        'reset_token': reset_token,
+        'token': reset_token
     }), 200
 
 @auth_bp.route('/reset-password', methods=['POST'])

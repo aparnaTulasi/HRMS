@@ -6,7 +6,8 @@ from models.attendance_device import AttendanceDevice
 from models.attendance_settings import AttendanceSettings
 from models.employee import Employee
 from models.user import User
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 from datetime import datetime
 from models.attendance_policy import AttendancePolicy
 import uuid
@@ -43,7 +44,7 @@ def device_heartbeat():
 
 @attendance_features_bp.route('/device/list', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def list_devices():
     company_id = g.user.company_id
     devices = AttendanceDevice.query.filter_by(company_id=company_id).all()
@@ -85,7 +86,7 @@ def list_devices():
 
 @attendance_features_bp.route('/device/register', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def register_device():
     data = request.get_json()
     if not all(k in data for k in ['device_code', 'device_name', 'device_type']):
@@ -160,7 +161,7 @@ def batch_punch_upload():
 
 @attendance_features_bp.route('/sync/logs', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def get_sync_logs():
     logs = AttendancePunchLog.query.filter_by(company_id=g.user.company_id).order_by(AttendancePunchLog.created_at.desc()).limit(100).all()
     return jsonify({
@@ -178,7 +179,7 @@ def get_sync_logs():
 
 @attendance_features_bp.route('/sync/trigger', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def trigger_sync():
     logs = AttendancePunchLog.query.filter_by(company_id=g.user.company_id, status='RECEIVED').all()
     if not logs:
@@ -213,7 +214,7 @@ def mobile_punch():
 
 @attendance_features_bp.route('/sync/status', methods=['GET'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def get_sync_status():
     company_id = g.user.company_id
     settings = AttendanceSettings.query.filter_by(company_id=company_id).first()
@@ -237,7 +238,7 @@ def get_sync_status():
 
 @attendance_features_bp.route('/sync/settings', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def update_sync_settings():
     data = request.get_json()
     company_id = g.user.company_id
@@ -324,7 +325,7 @@ def get_attendance_policy():
 
 @attendance_features_bp.route('/policy', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR', 'SUPER_ADMIN'])
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def update_attendance_policy():
     data = request.get_json()
     policy = AttendancePolicy.query.filter_by(company_id=g.user.company_id).first()
@@ -409,11 +410,10 @@ def request_regularization():
 
 @attendance_features_bp.route('/regularization/request/<int:request_id>/review', methods=['POST'])
 @token_required
-@role_required(['ADMIN', 'HR', 'MANAGER'])
+@permission_required(Permissions.ATTENDANCE_APPROVE)
 def review_regularization_request(request_id):
     # Enforce Permission: HR/Manager must have MANAGE_ATTENDANCE permission
-    if g.user.role not in ['SUPER_ADMIN', 'ADMIN'] and not g.user.has_permission('MANAGE_ATTENDANCE'):
-        return jsonify({'message': 'Permission denied: MANAGE_ATTENDANCE required'}), 403
+    # Permission check now handled by decorator
 
     data = request.get_json()
     new_status = data.get('status')

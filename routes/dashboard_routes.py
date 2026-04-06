@@ -17,6 +17,14 @@ dashboard_bp = Blueprint('dashboard', __name__)
 @dashboard_bp.route('/stats', methods=['GET'])
 @token_required
 def get_dashboard_stats():
+    # Legacy stats API
+    return _get_role_dashboard_stats()
+
+def _get_role_dashboard_stats():
+    """
+    Core logic for calculating dashboard stats based on user role.
+    Shared by /api/dashboard/stats and /<username>/<company>/dashboard
+    """
     role = (g.user.role or "").upper()
     user_id = g.user.id
     cid = g.user.company_id
@@ -24,8 +32,13 @@ def get_dashboard_stats():
 
     # --- 1. SUPER ADMIN DASHBOARD ---
     if role in ["SUPER_ADMIN", "SUPERADMIN"]:
+        from models.branch import Branch
         total_companies = Company.query.count()
-        total_users = User.query.count()
+        total_branches = Branch.query.count()
+        total_admins = User.query.filter_by(role="ADMIN").count()
+        total_hrs = User.query.filter_by(role="HR").count()
+        total_managers = User.query.filter_by(role="MANAGER").count()
+        total_employees = Employee.query.count()
         active_users = User.query.filter_by(status='ACTIVE').count()
         
         # Module Usage
@@ -34,21 +47,64 @@ def get_dashboard_stats():
         leave_usage = Company.query.filter_by(has_leave=True).count()
         performance_usage = Company.query.filter_by(has_performance=True).count()
 
+        # Attendance summary (for today)
+        today_date = date.today()
+        attendance_counts = db.session.query(Attendance.status, func.count(Attendance.attendance_id))\
+            .filter(Attendance.attendance_date == today_date).group_by(Attendance.status).all()
+        att_dict = {status: count for status, count in attendance_counts}
+        
+        # Pending Requests
+        pending_leaves = LeaveRequest.query.filter_by(status='PENDING').count()
+        # WFH and Expense require models not imported here yet, adding imports inside if needed or just count
+        from models.hr_documents import WFHRequest
+        from models.travel_expense import TravelExpense
+        pending_wfh = WFHRequest.query.filter_by(status='PENDING').count()
+        pending_expenses = TravelExpense.query.filter_by(status='Pending').count()
+
         return jsonify({
             "success": True,
             "role": "SUPER_ADMIN",
             "data": {
                 "top_stats": [
                     {"label": "Total Companies", "value": total_companies, "icon": "Business"},
-                    {"label": "Total Users", "value": total_users, "icon": "People"},
-                    {"label": "Active Today", "value": active_users, "icon": "CheckCircle"}
+                    {"label": "Total Branches", "value": total_branches, "icon": "Map"},
+                    {"label": "Total Users", "value": User.query.count(), "icon": "People"},
+                    {"label": "Active Users", "value": active_users, "icon": "CheckCircle"}
                 ],
+                "stats": {
+                    "total_companies": total_companies,
+                    "total_branches": total_branches,
+                    "total_admins": total_admins,
+                    "total_hrs": total_hrs,
+                    "total_managers": total_managers,
+                    "total_employees": total_employees,
+                    "totalCompanies": total_companies,
+                    "totalBranches": total_branches,
+                    "totalAdmins": total_admins,
+                    "totalHrs": total_hrs,
+                    "totalManagers": total_managers,
+                    "totalEmployees": total_employees,
+                    "active_users": active_users
+                },
+                "attendance_summary": [
+                    {"label": "Present", "value": att_dict.get("Present", 0)},
+                    {"label": "Absent", "value": att_dict.get("Absent", 0)},
+                    {"label": "WFH", "value": att_dict.get("WFH", 0)},
+                    {"label": "Leave", "value": att_dict.get("Leave", 0) + att_dict.get("Half Day", 0)}
+                ],
+                "pending_actions": {
+                    "leaves": pending_leaves,
+                    "wfh": pending_wfh,
+                    "expenses": pending_expenses,
+                    "total": pending_leaves + pending_wfh + pending_expenses
+                },
                 "module_usage": [
                     {"name": "Payroll", "count": payroll_usage},
                     {"name": "Attendance", "count": attendance_usage},
                     {"name": "Leave", "count": leave_usage},
                     {"name": "Performance", "count": performance_usage}
-                ]
+                ],
+                "last_updated": datetime.now().isoformat()
             }
         })
 

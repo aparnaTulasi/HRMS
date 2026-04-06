@@ -17,6 +17,7 @@ def get_upload_folder():
 
 @documents_bp.route('/upload', methods=['POST'])
 @token_required
+@permission_required("DOCUMENTS_CREATE")
 def upload_document():
     if 'document_file' not in request.files:
         return jsonify({'message': 'No file part'}), 400
@@ -62,6 +63,7 @@ def upload_document():
 
 @documents_bp.route('/download/<filename>')
 @token_required
+@permission_required("DOCUMENTS_VIEW")
 def download_document(filename):
     document = EmployeeDocument.query.filter(EmployeeDocument.file_url.endswith(filename)).first_or_404()
     if document.employee_id != g.user.employee_profile.id and g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:

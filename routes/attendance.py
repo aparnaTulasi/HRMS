@@ -9,7 +9,8 @@ from models.attendance import Attendance, AttendanceRegularization
 from models.employee import Employee
 from models.user import User
 from models.shift import Shift, ShiftAssignment
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
+from constants.permissions_registry import Permissions
 from utils.audit_logger import log_action
 
 from sqlalchemy import func
@@ -18,6 +19,7 @@ attendance_bp = Blueprint("attendance", __name__)
 
 @attendance_bp.route("/shifts", methods=["GET"])
 @token_required
+@permission_required(Permissions.SHIFT_MANAGEMENT)
 def get_shifts():
     if g.user.role == "SUPER_ADMIN":
         shifts = Shift.query.all()
@@ -47,13 +49,10 @@ def get_shifts():
         "shifts": output
     })
 
-ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR", "MANAGER"]
-
+# DEPRECATED: Use @permission_required instead
 def has_attendance_permission():
     """Checks if the current user has permission to manage attendance."""
-    if g.user.role in ['SUPER_ADMIN', 'ADMIN', 'HR']:
-        return True
-    return g.user.has_permission('MANAGE_ATTENDANCE')
+    return g.user.has_permission(Permissions.ATTENDANCE_VIEW)
 
 
 # -----------------------------
@@ -155,7 +154,7 @@ def _upsert_attendance(company_id: int, employee_id: int, att_date: date, payloa
 # -----------------------------
 @attendance_bp.route("", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def list_attendance():
     """
     Filters used by your UI:
@@ -173,9 +172,6 @@ def list_attendance():
     from_date = request.args.get("from_date")
     to_date = request.args.get("to_date")
     search = (request.args.get("search") or "").strip().lower()
-
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
 
     q = Attendance.query
 
@@ -260,10 +256,9 @@ def list_attendance():
 # -----------------------------
 # 2) Manual Attendance (Create/Upsert)
 # -----------------------------
-@attendance_bp.route("", methods=["POST"])
 @attendance_bp.route("/manual", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def manual_attendance():
     """
     Manual button action (UPSERT):
@@ -280,9 +275,6 @@ def manual_attendance():
 
     if not employee_id or not att_date:
         return jsonify({"message": "employee_id and date are required"}), 400
-
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
 
     # Handle Super Admin lookup (find employee across any company)
     # 1. Try by Employee Code (string)
@@ -343,13 +335,10 @@ def manual_attendance():
 # -----------------------------
 @attendance_bp.route("/<int:attendance_id>", methods=["PUT"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def update_attendance(attendance_id):
     data = request.get_json() or {}
     row = Attendance.query.get(attendance_id)
-
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
 
     if not row:
         return jsonify({"message": "Attendance not found"}), 404
@@ -397,14 +386,11 @@ def update_attendance(attendance_id):
 # -----------------------------
 @attendance_bp.route("/<int:attendance_id>", methods=["DELETE"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def delete_attendance(attendance_id):
     row = Attendance.query.get(attendance_id)
     if not row:
         return jsonify({"message": "Attendance not found"}), 404
-
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
 
     # Allow Super Admin or Company Admin
     if g.user.role != 'SUPER_ADMIN' and row.company_id != g.user.company_id:
@@ -484,11 +470,8 @@ def normalize_status(s):
 
 @attendance_bp.route("/import", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def import_attendance():
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
-
     uploaded = pick_uploaded_file()
     if not uploaded:
         return jsonify({"message": "No file found. Please send multipart/form-data with any file key."}), 400
@@ -596,29 +579,22 @@ def import_attendance():
 # -----------------------------
 @attendance_bp.route("/me", methods=["GET"])
 @token_required
-@role_required(["EMPLOYEE", "ADMIN", "HR", "MANAGER", "SUPER_ADMIN"])
 def my_attendance():
     """
-    Unified view: 
-    - Employees see their own records.
-    - Admins/HR/Super Admins see all records for their scope (Common Dashboard).
+    Returns the personal attendance log for the current user.
+    Always filters by the logged-in user's employee_id.
     """
-    if g.user.role in ['SUPER_ADMIN', 'ADMIN', 'HR']:
-        # Common Dashboard View for Admins
-        q = Attendance.query
-        if g.user.role != 'SUPER_ADMIN':
-            q = q.filter_by(company_id=g.user.company_id)
-        
-        q = q.order_by(Attendance.attendance_date.desc()).limit(500)
-    else:
-        # Privacy View for Employees and Managers (own attendance)
-        emp = Employee.query.filter_by(user_id=g.user.id, company_id=g.user.company_id).first()
-        if not emp:
-            return jsonify({"success": False, "message": "Employee profile not found"}), 404
+    # 1. Identify current employee profile
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        # For Super Admin or other roles without profile, return empty list instead of 404
+        # to prevent UI breakage on the personal log page
+        return jsonify({"success": True, "attendance": []}), 200
 
-        q = Attendance.query.filter_by(employee_id=emp.id)\
-                            .order_by(Attendance.attendance_date.desc())\
-                            .limit(180)
+    # 2. Fetch logs (last 180 days)
+    q = Attendance.query.filter_by(employee_id=emp.id)\
+                        .order_by(Attendance.attendance_date.desc())\
+                        .limit(180)
 
     output = []
     for r in q.all():
@@ -627,10 +603,10 @@ def my_attendance():
             "status": r.status,
             "remarks": getattr(r, "remarks", ""),
             "loggedTime": _format_logged_time(r.total_minutes),
-            "loginAt": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else None,
-            "logoutAt": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else None,
-            "attendanceDate": r.attendance_date.strftime("%d/%m/%Y"),
-            "date": r.attendance_date.strftime("%d/%m/%Y"), # Keep legacy for safety
+            "loginAt": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else "--:--",
+            "logoutAt": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else "--:--",
+            "attendanceDate": r.attendance_date.strftime("%d-%m-%Y"),
+            "date": r.attendance_date.strftime("%d-%m-%Y"), # Standardized for UI
         })
 
     return jsonify({"success": True, "attendance": output}), 200
@@ -641,14 +617,13 @@ def my_attendance():
 # -----------------------------
 @attendance_bp.route("/login", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def attendance_login():
     data = request.get_json()
     employee_id = data.get("employee_id")
     status = data.get("status", "Present")
 
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: Employees cannot mark their own attendance"}), 403
+    # Permission check now handled by decorator
 
     if not employee_id:
         return jsonify({"message": "employee_id required"}), 400
@@ -700,13 +675,12 @@ def attendance_login():
 
 @attendance_bp.route("/logout", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def attendance_logout():
     data = request.get_json()
     employee_id = data.get("employee_id")
 
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: Employees cannot mark their own attendance"}), 403
+    # Permission check now handled by decorator
 
     # Build query to find employee, handling Super Admin case
     query = Employee.query.filter_by(employee_id=employee_id)
@@ -813,7 +787,7 @@ def my_regularization_requests():
 
 @attendance_bp.route("/regularization/pending", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_APPROVE)
 def pending_regularization_requests():
     if not has_attendance_permission():
         return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
@@ -853,10 +827,9 @@ def pending_regularization_requests():
 
 @attendance_bp.route("/regularization/<int:request_id>/approve", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_APPROVE)
 def approve_regularization(request_id):
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
+    # Permission check now handled by decorator
 
     data = request.get_json() or {}
     req = AttendanceRegularization.query.get_or_404(request_id)
@@ -886,10 +859,9 @@ def approve_regularization(request_id):
 
 @attendance_bp.route("/regularization/<int:request_id>/reject", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_APPROVE)
 def reject_regularization(request_id):
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied: MANAGE_ATTENDANCE required"}), 403
+    # Permission check now handled by decorator
 
     data = request.get_json() or {}
     req = AttendanceRegularization.query.get_or_404(request_id)
@@ -903,14 +875,13 @@ def reject_regularization(request_id):
     
 @attendance_bp.route("/bulk-list", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def bulk_list_attendance_employees():
     """
     Returns all employees in the company with their current attendance status 
     for the provided date. Used by Bulk Attendance dashboard.
     """
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied"}), 403
+    # Permission check now handled by decorator
 
     att_date_str = request.args.get("date")
     if not att_date_str:
@@ -963,14 +934,13 @@ def bulk_list_attendance_employees():
 
 @attendance_bp.route("/bulk-save", methods=["POST"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_EDIT)
 def bulk_save_attendance():
     """
     Processes a list of attendance updates. 
     Payload: { "date": "YYYY-MM-DD", "updates": [ { "employee_id": 1, "status": "Present", "remarks": "...", "shift_id": 1 }, ... ] }
     """
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied"}), 403
+    # Permission check now handled by decorator
 
     data = request.get_json() or {}
     att_date_str = data.get("date")
@@ -1035,13 +1005,12 @@ def bulk_save_attendance():
 
 @attendance_bp.route("/employee-details/<employee_id>", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def get_employee_attendance_details(employee_id):
     """
     Fetches employee full name and current assigned shift for auto-population in UI.
     """
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied"}), 403
+    # Permission check now handled by decorator
 
     # Try by Employee Code (string)
     query = Employee.query.filter_by(employee_id=str(employee_id))
@@ -1084,13 +1053,12 @@ def get_employee_attendance_details(employee_id):
 
 @attendance_bp.route("/dashboard-stats", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required(Permissions.ATTENDANCE_VIEW)
 def dashboard_stats():
     """
     Returns real-time dashboard data for management roles.
     """
-    if not has_attendance_permission():
-        return jsonify({"message": "Permission denied"}), 403
+    # Permission check now handled by decorator
 
     today = date.today()
     company_id = g.user.company_id
@@ -1182,4 +1150,108 @@ def dashboard_stats():
             "absent": absent_counts
         },
         "overview": overview
+    }), 200
+
+# -----------------------------
+# 10) Personal Attendance Summary (My Space)
+# -----------------------------
+@attendance_bp.route("/my-summary", methods=["GET"])
+@token_required
+@permission_required("DASHBOARD_VIEW")
+def get_my_attendance_summary():
+    """
+    Returns personalized attendance statistics and chart data for the current user.
+    """
+    emp = Employee.query.filter_by(user_id=g.user.id).first()
+    if not emp:
+        return jsonify({"success": False, "message": "Employee profile not found"}), 404
+
+    today = date.today()
+    # Monthly summary (current month)
+    month_start = today.replace(day=1)
+    
+    # 1. Summary Counts (Current Month)
+    att_month = Attendance.query.filter(
+        Attendance.employee_id == emp.id,
+        Attendance.attendance_date >= month_start,
+        Attendance.attendance_date <= today
+    ).all()
+    
+    summary = {
+        "PRESENT": 0,
+        "ABSENT": 0,
+        "HALF DAY": 0,
+        "LATE": 0,
+        "WFH": 0
+    }
+    for r in att_month:
+        status_key = r.status.upper()
+        if status_key in summary:
+            summary[status_key] += 1
+
+    # 2. Shift Distribution (Current Month)
+    shift_counts = {}
+    for r in att_month:
+        if r.status == "Present":
+            s_name = "General Shift"
+            if r.shift_id:
+                s_obj = Shift.query.get(r.shift_id)
+                if s_obj: s_name = s_obj.shift_name
+            shift_counts[s_name] = shift_counts.get(s_name, 0) + 1
+            
+    shift_dist = {
+        "labels": list(shift_counts.keys()),
+        "data": list(shift_counts.values())
+    }
+
+    # 3. Weekly Trend (Last 7 Days)
+    week_ago = today - timedelta(days=6)
+    days = []
+    present_trend = []
+    absent_trend = []
+    
+    for i in range(7):
+        d = week_ago + timedelta(days=i)
+        days.append(d.strftime("%a"))
+        
+        # Check if record exists for this day
+        rec = next((r for r in att_month if r.attendance_date == d), None)
+        if not rec:
+            # Check DB if not in current month records (if week crosses month boundary)
+            if d < month_start:
+                rec = Attendance.query.filter_by(employee_id=emp.id, attendance_date=d).first()
+        
+        present_trend.append(1 if rec and rec.status == "Present" else 0)
+        absent_trend.append(1 if rec and rec.status == "Absent" else 0)
+
+    # 4. Today's Overview (Own Record)
+    today_rec = next((r for r in att_month if r.attendance_date == today), None)
+    overview_entry = []
+    if today_rec:
+        s_name = "General Shift"
+        if today_rec.shift_id:
+            s_obj = Shift.query.get(today_rec.shift_id)
+            if s_obj: s_name = s_obj.shift_name
+            
+        overview_entry.append({
+            "name": emp.full_name,
+            "emp_code": emp.employee_id,
+            "status": today_rec.status,
+            "shift": s_name,
+            "punch_in": today_rec.punch_in_time.strftime("%I:%M %p") if today_rec.punch_in_time else "--:--",
+            "punch_out": today_rec.punch_out_time.strftime("%I:%M %p") if today_rec.punch_out_time else "--:--"
+        })
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "summary": summary,
+            "shift_dist": shift_dist,
+            "trend": {
+                "labels": days,
+                "present": present_trend,
+                "absent": absent_trend
+            },
+            "overview": overview_entry
+        }
     }), 200
