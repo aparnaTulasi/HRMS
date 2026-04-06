@@ -967,6 +967,60 @@ def get_user_permissions(user_id):
             "permissions": grouped
         }
     })
+
+@superadmin_bp.route('/update-user-permissions/<int:user_id>', methods=['POST', 'PUT'])
+@token_required
+@role_required(["SUPER_ADMIN"])
+def update_user_permissions(user_id):
+    """
+    Updates permissions for an existing user.
+    Clears old perms and re-assigns from the new matrix.
+    """
+    user = User.query.get_or_404(user_id)
+    data = request.get_json() or {}
+    
+    # 1. New Permissions Matrix
+    # Input format: {"Dashboard": ["VIEW", "CREATE"], "Employees": ["VIEW"]}
+    matrix = data.get('permissions', {})
+    
+    if not isinstance(matrix, dict):
+        return jsonify({"success": False, "message": "Invalid permissions format. Expected dictionary."}), 400
+
+    try:
+        # 2. Clear EXISTING Permissions for this user
+        UserPermission.query.filter_by(user_id=user_id).delete()
+        
+        # 3. Add NEW Permissions
+        added_count = 0
+        for module, actions in matrix.items():
+            if module in MODULES:
+                for action in actions:
+                    if action in ACTIONS:
+                        perm_code = get_permission_code(module, action)
+                        user_perm = UserPermission(
+                            user_id=user_id,
+                            permission_code=perm_code,
+                            granted_by=g.user.id
+                        )
+                        db.session.add(user_perm)
+                        added_count += 1
+        
+        db.session.commit()
+        
+        # Audit Log
+        from utils.audit_logger import log_action
+        log_action("UPDATE_USER_PERMISSIONS", "User", user_id, 200, 
+                   meta={"email": user.email, "count": added_count})
+        
+        return jsonify({
+            "success": True,
+            "message": f"Permissions for {user.email} updated successfully. ({added_count} rules added)"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Failed to update permissions for user {user_id}: {str(e)}")
+        return jsonify({"success": False, "message": f"Failed to update permissions: {str(e)}"}), 500
     for field in direct_fields:
         camel_field = field.split('_')[0] + ''.join(x.title() for x in field.split('_')[1:])
         val = data.get(field)

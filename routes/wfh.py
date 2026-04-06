@@ -6,7 +6,7 @@ from models.attendance import Attendance
 from models.hr_documents import WFHRequest
 from models.employee import Employee
 from models.user import User
-from utils.decorators import token_required, role_required
+from utils.decorators import token_required, role_required, permission_required
 from sqlalchemy import func
 
 wfh_bp = Blueprint("wfh", __name__)
@@ -17,7 +17,7 @@ ALLOWED_MANAGE_ROLES = ["SUPER_ADMIN", "ADMIN", "HR", "MANAGER"]
 
 @wfh_bp.route("/summary", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required("REQUESTS_VIEW")
 def wfh_summary():
     company_id = g.user.company_id
     if g.user.role == 'SUPER_ADMIN':
@@ -41,7 +41,7 @@ def wfh_summary():
 
 @wfh_bp.route("/requests", methods=["GET"])
 @token_required
-@role_required(ALLOWED_MANAGE_ROLES)
+@permission_required("REQUESTS_VIEW")
 def list_wfh_requests():
     company_id = g.user.company_id
     if g.user.role == 'SUPER_ADMIN':

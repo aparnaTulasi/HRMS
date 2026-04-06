@@ -4,7 +4,7 @@ from werkzeug.utils import secure_filename
 from models import db
 from models.employee_documents import EmployeeDocument, DocumentType
 from models.employee import Employee
-from utils.decorators import token_required
+from utils.decorators import token_required, permission_required
 import uuid
 from datetime import datetime
 

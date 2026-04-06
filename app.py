@@ -57,7 +57,6 @@ from routes.training_routes import training_bp
 from routes.expense_routes import expense_bp
 from routes.dashboard_routes import dashboard_bp
 from routes.main_routes import main_bp
-from routes.permissions import permissions_bp
 
 from models.permission import Permission, UserPermission
 from models.department import Department
