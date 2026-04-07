@@ -1224,11 +1224,11 @@ def get_leave_summary_report():
         if req.approved_by:
             approver = Employee.query.get(req.approved_by)
             if approver:
-                approved_by_name = f"{approver.first_name} {approver.last_name}"
+                approved_by_name = approver.full_name
         
         details.append({
             'id': req.id,
-            'employee_name': f"{emp.first_name} {emp.last_name}" if emp else "Unknown",
+            'employee_name': emp.full_name if emp else "Unknown",
             'leave_type': lt.name if lt else "Unknown",
             'leave_type_code': lt.code if lt else "N/A",
             'from_date': req.from_date.isoformat(),

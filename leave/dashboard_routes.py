@@ -125,7 +125,7 @@ def get_leave_dashboard_recent():
     for req, emp, lt in recent_requests:
         results.append({
             'id': req.id,
-            'employee': f"{emp.first_name} {emp.last_name}",
+            'employee': emp.full_name,
             'type': lt.name,
             'period': f"{req.from_date.strftime('%b %d')} - {req.to_date.strftime('%b %d')}",
             'days': f"{(req.to_date - req.from_date).days + 1}d",

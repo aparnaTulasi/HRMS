@@ -56,7 +56,13 @@ from routes.access_control import access_control_bp
 from routes.training_routes import training_bp
 from routes.expense_routes import expense_bp
 from routes.dashboard_routes import dashboard_bp
+from routes.visitor_routes import visitor_bp
+from routes.desk_routes import desk_bp
+from routes.delegation_routes import delegation_bp
+from routes.document_center_routes import doc_center_bp
 from routes.main_routes import main_bp
+from routes.desk_routes import desk_bp
+from routes.document_center_routes import doc_center_bp
 
 from models.permission import Permission, UserPermission
 from models.department import Department
@@ -71,6 +77,8 @@ from models.job_applicant import JobApplicant
 from models.profile_change_request import ProfileChangeRequest
 from models.profile_change_request_item import ProfileChangeRequestItem
 from models.notification import Notification
+from models.visitor import VisitorRequest
+from models.desk import Desk, DeskBooking
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -131,6 +139,10 @@ app.register_blueprint(access_control_bp, url_prefix="/api/admin/access-control"
 app.register_blueprint(training_bp, url_prefix="/api/hr/training")
 app.register_blueprint(expense_bp, url_prefix="/api/expenses")
 app.register_blueprint(dashboard_bp, url_prefix="/api/dashboard")
+app.register_blueprint(visitor_bp, url_prefix='/api/visitor')
+app.register_blueprint(desk_bp, url_prefix='/api/desk')
+app.register_blueprint(delegation_bp, url_prefix='/api/delegation')
+app.register_blueprint(doc_center_bp, url_prefix='/api/document-center')
 app.register_blueprint(main_bp)
 
 @app.route('/')

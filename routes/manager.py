@@ -25,7 +25,7 @@ def get_team_members():
         "team": [{
             "id": e.id,
             "employee_id": e.employee_id,
-            "name": f"{e.first_name} {e.last_name}",
+            "name": e.full_name,
             "department": e.department,
             "designation": e.designation,
             "status": e.status
@@ -58,7 +58,7 @@ def get_team_attendance():
     for e in team:
         att = att_map.get(e.id)
         output.append({
-            "name": f"{e.first_name} {e.last_name}",
+            "name": e.full_name,
             "employee_id": e.employee_id,
             "status": att.status if att else "Not Logged Today",
             "in_time": att.punch_in_time.strftime("%I:%M %p") if att and att.punch_in_time else "--",
@@ -91,7 +91,7 @@ def get_pending_requests():
         "success": True,
         "leaves": [{
             "id": l.id,
-            "employee_name": f"{l.employee.first_name} {l.employee.last_name}",
+            "employee_name": l.employee.full_name,
             "leave_type": l.leave_type,
             "from_date": l.from_date.strftime("%Y-%m-%d"),
             "to_date": l.to_date.strftime("%Y-%m-%d"),

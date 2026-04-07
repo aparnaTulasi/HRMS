@@ -61,8 +61,7 @@ def list_wfh_requests():
     if search:
         query = query.filter(
             db.or_(
-                func.lower(Employee.first_name).like(f"%{search}%"),
-                func.lower(Employee.last_name).like(f"%{search}%"),
+                func.lower(Employee.full_name).like(f"%{search}%"),
                 func.lower(Employee.department).like(f"%{search}%")
             )
         )

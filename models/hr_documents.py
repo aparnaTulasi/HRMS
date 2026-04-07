@@ -196,7 +196,7 @@ class HRDocument(db.Model):
 
     title = db.Column(db.String(150), nullable=False)
     category = db.Column(db.String(100), nullable=True) # Policy, Handbook, Form
-    file_path = db.Column(db.String(255), nullable=False)
+    file_content = db.Column(db.LargeBinary) # Stores the actual file in DB
     file_size = db.Column(db.String(20), nullable=True)
     file_type = db.Column(db.String(20), nullable=True)
     is_active = db.Column(db.Boolean, default=True)

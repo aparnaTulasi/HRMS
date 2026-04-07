@@ -9,6 +9,10 @@ def parse_date(val):
         return None
     try:
         # Handles both "YYYY-MM-DD" and "YYYY-MM-DDTHH:MM:SS.sssZ"
-        return datetime.strptime(val.split('T')[0], "%Y-%m-%d").date()
+        d_str = val.split('T')[0]
+        try:
+            return datetime.strptime(d_str, "%Y-%m-%d").date()
+        except ValueError:
+            return datetime.strptime(d_str, "%d-%m-%Y").date()
     except (ValueError, TypeError):
         return None

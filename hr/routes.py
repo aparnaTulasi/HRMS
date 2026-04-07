@@ -16,8 +16,7 @@ def get_employees():
         user = User.query.get(emp.user_id)
         output.append({
             'id': emp.id,
-            'first_name': emp.first_name,
-            'last_name': emp.last_name,
+            'name': emp.full_name,
             'email': user.email,
             'status': user.status,
             'department': emp.department,

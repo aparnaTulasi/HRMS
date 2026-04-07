@@ -22,8 +22,7 @@ def get_profile():
         return jsonify({'message': 'Profile not found'}), 404
     return jsonify({
         'id': emp.id,
-        'first_name': emp.first_name,
-        'last_name': emp.last_name,
+        'full_name': emp.full_name,
         'department': emp.department,
         'designation': emp.designation,
         'phone': getattr(emp, 'work_phone', None),

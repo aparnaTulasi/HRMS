@@ -213,8 +213,7 @@ def list_attendance():
     if search:
         q = q.filter(
             db.or_(
-                db.func.lower(Employee.first_name).like(f"%{search}%"),
-                db.func.lower(Employee.last_name).like(f"%{search}%"),
+                db.func.lower(Employee.full_name).like(f"%{search}%"),
                 db.func.lower(User.email).like(f"%{search}%"),
                 db.func.lower(getattr(Employee, "employee_id", "")).like(f"%{search}%")
             )
@@ -237,7 +236,7 @@ def list_attendance():
             "attendance_id": r.attendance_id,
             "employeeHeight": emp.employee_id if emp else "",
             "employeeId": emp.employee_id if emp else "",
-            "name": f"{emp.first_name} {emp.last_name}" if emp else "",
+            "name": emp.full_name if emp else "",
             "role": user.role if user else None,
             "department": emp.department if emp else None,
             "status": r.status,
@@ -598,13 +597,16 @@ def my_attendance():
 
     output = []
     for r in q.all():
+        # Decimal hours calculation (e.g., 8.95)
+        decimal_hours = round(r.total_minutes / 60.0, 2)
+        
         output.append({
             "id": r.attendance_id,
             "status": r.status,
             "remarks": getattr(r, "remarks", ""),
-            "loggedTime": _format_logged_time(r.total_minutes),
-            "loginAt": r.punch_in_time.strftime("%I:%M %p") if r.punch_in_time else "--:--",
-            "logoutAt": r.punch_out_time.strftime("%I:%M %p") if r.punch_out_time else "--:--",
+            "loggedTime": decimal_hours,
+            "loginAt": r.punch_in_time.strftime("%H:%M") if r.punch_in_time else "--:--",
+            "logoutAt": r.punch_out_time.strftime("%H:%M") if r.punch_out_time else "--:--",
             "attendanceDate": r.attendance_date.strftime("%d-%m-%Y"),
             "date": r.attendance_date.strftime("%d-%m-%Y"), # Standardized for UI
         })

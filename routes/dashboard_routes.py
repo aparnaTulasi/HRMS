@@ -8,9 +8,10 @@ from models.task import Task
 from models.payroll import PaySlip
 from models.company import Company
 from models.user import User
-from leave.models import LeaveRequest, LeaveBalance, Holiday
+from leave.models import LeaveRequest, LeaveBalance, Holiday, EmployeeHolidayCalendar
 from utils.decorators import token_required
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
+import calendar
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -238,7 +239,7 @@ def _get_role_dashboard_stats():
         shift_str = f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}"
 
     balances = LeaveBalance.query.filter_by(employee_id=emp.id).all()
-    total_balance = sum([b.balance for b in balances])
+    total_balance = sum([(b.balance or 0.0) for b in balances])
     pending_leaves = LeaveRequest.query.filter_by(employee_id=emp.id, status='Pending').count()
     pending_tasks = Task.query.filter_by(assigned_to_employee_id=emp.id, status='Pending').count()
 
@@ -308,5 +309,137 @@ def get_salary_dashboard():
         "data": {
             "salary_trend": trend,
             "recent_payslips": recent[:3] # Top 3
+        }
+    })
+
+@dashboard_bp.route('/employee', methods=['GET'])
+@token_required
+def get_employee_dashboard():
+    """
+    Comprehensive Employee Dashboard API returning real data for the rich UI.
+    """
+    user_id = g.user.id
+    today = date.today()
+    
+    emp = Employee.query.filter_by(user_id=user_id).first()
+    if not emp:
+        return jsonify({"success": False, "message": "Employee profile not found"}), 404
+
+    # 1. AT A GLANCE (Attendance & Shift)
+    att = Attendance.query.filter_by(employee_id=emp.id, attendance_date=today).first()
+    status = "Absent"
+    in_time = "--:--"
+    out_time = "--:--"
+    logged_hours = "0h 0m"
+    
+    if att:
+        status = att.status
+        if att.punch_in_time: in_time = att.punch_in_time.strftime("%I:%M %p")
+        if att.punch_out_time: out_time = att.punch_out_time.strftime("%I:%M %p")
+        total_mins = att.total_minutes or 0
+        h = total_mins // 60
+        m = total_mins % 60
+        logged_hours = f"{h}h {m}m"
+    elif today.weekday() >= 5: # Assuming Sat/Sun are weekends if no attendance
+        status = "Weekend"
+
+    shift_assign = ShiftAssignment.query.filter_by(employee_id=emp.id).first()
+    shift_str = "General Shift"
+    if shift_assign and shift_assign.shift:
+        s = shift_assign.shift
+        shift_str = f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}"
+
+    # 2. LEAVE BALANCE
+    balances = LeaveBalance.query.filter_by(employee_id=emp.id).all()
+    total_balance = sum([(b.balance or 0.0) for b in balances])
+    
+    last_leave = LeaveRequest.query.filter_by(employee_id=emp.id).order_by(desc(LeaveRequest.created_at)).first()
+    leave_msg = "No recent requests"
+    if last_leave:
+        leave_msg = f"Last Request: {last_leave.status}"
+        if last_leave.status == 'Pending':
+            leave_msg = "Next Leave Approval: Pending"
+
+    # 3. ACTION REQUIRED (Tasks)
+    pending_tasks_query = Task.query.filter(
+        Task.assigned_to_employee_id == emp.id, 
+        Task.status.in_(['Pending', 'InProgress'])
+    )
+    tasks_count = pending_tasks_query.count()
+    latest_task = pending_tasks_query.order_by(desc(Task.created_at)).first()
+    task_label = latest_task.title if latest_task else "No pending tasks"
+
+    # 4. NEXT HOLIDAY
+    # Find holiday from calendars linked to this employee
+    next_holiday = db.session.query(Holiday).join(EmployeeHolidayCalendar, Holiday.calendar_id == EmployeeHolidayCalendar.calendar_id)\
+        .filter(EmployeeHolidayCalendar.employee_id == emp.id, Holiday.date >= today)\
+        .order_by(Holiday.date).first()
+    
+    if not next_holiday:
+        # Fallback to any company holiday
+        next_holiday = Holiday.query.filter(Holiday.company_id == emp.company_id, Holiday.date >= today)\
+            .order_by(Holiday.date).first()
+
+    holiday_data = {
+        "date": next_holiday.date.strftime("%b %d") if next_holiday else "N/A",
+        "name": next_holiday.name if next_holiday else "No upcoming holidays",
+        "day": next_holiday.date.strftime("%a") if next_holiday else ""
+    }
+
+    # 5. SALARY TREND (Last 5 Months)
+    payslips = PaySlip.query.filter_by(employee_id=emp.id)\
+        .order_by(desc(PaySlip.pay_year), desc(PaySlip.pay_month))\
+        .limit(5).all()
+    
+    month_names = ["", "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+    salary_trend = []
+    for ps in reversed(payslips):
+        salary_trend.append({
+            "month": month_names[ps.pay_month] if 1 <= ps.pay_month <= 12 else str(ps.pay_month),
+            "amount": ps.net_salary
+        })
+
+    # 6. RECENT PAYSLIPS (Top 3)
+    current_payslips = []
+    for ps in payslips[:3]:
+        current_payslips.append({
+            "id": ps.id,
+            "month": f"{month_names[ps.pay_month]} {ps.pay_year} Log",
+            "ref": f"Ref: #PS-{ps.pay_year}-{ps.pay_month:02d}",
+            "status": ps.status == "PAID"
+        })
+
+    # 7. NEXT PAY DATE
+    # Default to last day of current month
+    last_day = calendar.monthrange(today.year, today.month)[1]
+    next_pay_date = date(today.year, today.month, last_day).strftime("%B %d, %Y")
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "user": {
+                "full_name": emp.full_name,
+                "first_name": (emp.full_name.split()[0] if emp.full_name and emp.full_name.split() else "Employee")
+            },
+            "at_a_glance": {
+                "status": status,
+                "shift": shift_str,
+                "timings": {"in": in_time, "out": out_time},
+                "logged_hours": logged_hours,
+                "date": today.strftime("%d %b %Y")
+            },
+            "leave_balance": {
+                "days": int(total_balance),
+                "message": leave_msg
+            },
+            "action_required": {
+                "count": f"{tasks_count:02d}",
+                "label": "Tasks",
+                "latest_task": task_label
+            },
+            "next_holiday": holiday_data,
+            "salary_trend": salary_trend,
+            "current_payslips": current_payslips,
+            "next_pay_date": next_pay_date.upper()
         }
     })

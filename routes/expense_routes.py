@@ -8,97 +8,123 @@ from constants.permissions_registry import Permissions
 from utils.audit_logger import log_action
 from datetime import datetime, date, timedelta
 import sqlalchemy as sa
+from sqlalchemy import or_
 import calendar
+from utils.date_utils import parse_date
 
 expense_bp = Blueprint("expenses", __name__)
 
-def _company_id():
-    return getattr(g, "company_id", 1)
+def is_management():
+    """Admin/HR check for visibility."""
+    return g.user.role in ['ADMIN', 'SUPER_ADMIN', 'HR', 'MANAGER']
 
-def _user_id():
-    return getattr(g, "user_id", None)
-
-def _json_ok(data, message="Success"):
-    return jsonify({"success": True, "data": data, "message": message})
-
-@expense_bp.get("/stats")
+@expense_bp.route("/stats", methods=['GET'])
 @token_required
-@permission_required("TRAVEL_AND_EXPENSES_VIEW")
 def expense_stats():
-    cid = _company_id()
+    cid = g.user.company_id
+    is_mgr = is_management()
+    emp_id = g.user.employee_profile.id if g.user.employee_profile else None
+    
     # 1. Total Expenses (YTD)
     current_year = date.today().year
-    total_ytd = db.session.query(sa.func.sum(ExpenseClaim.amount)).filter(
+    ytd_q = db.session.query(sa.func.sum(ExpenseClaim.amount)).filter(
         ExpenseClaim.company_id == cid,
         ExpenseClaim.status == "APPROVED",
         ExpenseClaim.year == current_year
-    ).scalar() or 0
+    )
+    if not is_mgr:
+        ytd_q = ytd_q.filter(ExpenseClaim.employee_id == emp_id)
+    total_ytd = ytd_q.scalar() or 0
     
     # 2. Pending Claims
-    pending_count = ExpenseClaim.query.filter_by(company_id=cid, status="PENDING").count()
+    pending_q = ExpenseClaim.query.filter_by(company_id=cid, status="PENDING")
+    if not is_mgr:
+        pending_q = pending_q.filter_by(employee_id=emp_id)
+    pending_count = pending_q.count()
     
-    # 3. Approved Trips (Assumption: Flight/Hotel categories are trips)
-    approved_trips = ExpenseClaim.query.filter(
+    # 3. Approved Trips
+    trips_q = ExpenseClaim.query.filter(
         ExpenseClaim.company_id == cid,
         ExpenseClaim.status == "APPROVED",
         ExpenseClaim.category.in_(["Flight", "Hotel", "Taxi"])
-    ).count()
+    )
+    if not is_mgr:
+        trips_q = trips_q.filter(ExpenseClaim.employee_id == emp_id)
     
-    return _json_ok({
-        "total_expenses_ytd": total_ytd,
-        "pending_claims": pending_count,
-        "approved_trips": approved_trips,
-        "currency": "$"
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_expenses_ytd": total_ytd,
+            "pending_claims": pending_count,
+            "approved_trips": trips_q.count(),
+            "currency": "$"
+        }
     })
 
-@expense_bp.get("/trends")
+@expense_bp.route("/trends", methods=['GET'])
 @token_required
-@permission_required("TRAVEL_AND_EXPENSES_VIEW")
 def expense_trends():
-    cid = _company_id()
+    cid = g.user.company_id
+    is_mgr = is_management()
+    emp_id = g.user.employee_profile.id if g.user.employee_profile else None
+    
     trend = []
     now = date.today()
     for i in range(5, -1, -1):
         target_date = now - timedelta(days=i*30)
-        m = target_date.month
-        y = target_date.year
+        m, y = target_date.month, target_date.year
         month_name = calendar.month_name[m][:3]
         
-        monthly_sum = db.session.query(sa.func.sum(ExpenseClaim.amount)).filter(
+        q = db.session.query(sa.func.sum(ExpenseClaim.amount)).filter(
             ExpenseClaim.company_id == cid,
             ExpenseClaim.status == "APPROVED",
             ExpenseClaim.month == m,
             ExpenseClaim.year == y
-        ).scalar() or 0
-        
+        )
+        if not is_mgr:
+            q = q.filter(ExpenseClaim.employee_id == emp_id)
+            
+        monthly_sum = q.scalar() or 0
         trend.append({"month": month_name, "amount": monthly_sum})
         
-    return _json_ok(trend)
+    return jsonify({"success": True, "data": trend})
 
-@expense_bp.get("/claims")
+@expense_bp.route("/claims", methods=['GET'])
 @token_required
-@permission_required("TRAVEL_AND_EXPENSES_VIEW")
 def expense_claims_list():
-    items = ExpenseClaim.query.filter_by(company_id=_company_id()) \
-        .order_by(ExpenseClaim.created_at.desc()).limit(20).all()
-    return _json_ok([x.to_dict() for x in items])
+    cid = g.user.company_id
+    is_mgr = is_management()
+    
+    q = ExpenseClaim.query.filter_by(company_id=cid)
+    if not is_mgr:
+        emp_id = g.user.employee_profile.id if g.user.employee_profile else None
+        if not emp_id: return jsonify({"success": True, "data": []}), 200
+        q = q.filter_by(employee_id=emp_id)
+        
+    items = q.order_by(ExpenseClaim.created_at.desc()).limit(30).all()
+    return jsonify({"success": True, "data": [x.to_dict() for x in items]})
 
-@expense_bp.post("/claims")
+@expense_bp.route("/claims", methods=['POST'])
 @token_required
 def expense_claim_submit():
     payload = request.get_json()
-    e_date_str = payload.get("expense_date") # YYYY-MM-DD
+    e_date_str = payload.get("expense_date")
     if not e_date_str:
         return jsonify({"success": False, "message": "Date is required"}), 400
         
-    e_date = date.fromisoformat(e_date_str)
+    try:
+        e_date = parse_date(e_date_str)
+    except ValueError as ex:
+        return jsonify({"success": False, "message": str(ex)}), 400
+        
     now = datetime.now()
-    
-    user = g.get("user")
+    emp_profile = g.user.employee_profile
+    if not emp_profile:
+        return jsonify({"success": False, "message": "Employee profile required"}), 400
     
     claim = ExpenseClaim(
-        company_id=_company_id(),
-        employee_id=user.id if user else 1,
+        company_id=g.user.company_id,
+        employee_id=emp_profile.id,
         project_purpose=payload.get("project_purpose", "Business Expense"),
         category=payload.get("category", "Others"),
         amount=float(payload.get("amount", 0)),
@@ -107,38 +133,34 @@ def expense_claim_submit():
         description=payload.get("description"),
         status="PENDING",
         
-        # Detailed fields requested
+        # User specified data requirements: Day, Time, Year, Month
         year=e_date.year,
         month=e_date.month,
         day=e_date.day,
         time=now.strftime("%H:%M:%S"),
-        added_by_name=user.full_name if user else "Unknown"
+        added_by_name=g.user.name # Using model property for full name
     )
     db.session.add(claim)
     db.session.commit()
     
-    log_action(
-        action="SUBMIT_EXPENSE_CLAIM",
-        entity="ExpenseClaim",
-        entity_id=claim.id,
-        meta={"amount": claim.amount, "category": claim.category}
-    )
-    
-    return _json_ok({"id": claim.id}, "Expense claim submitted")
+    return jsonify({
+        "success": True, 
+        "message": "Expense claim submitted successfully",
+        "data": {"id": claim.id}
+    }), 201
 
-@expense_bp.patch("/claims/<int:cid>/action")
+@expense_bp.route("/claims/<int:cid>/action", methods=['PATCH'])
 @token_required
-@permission_required(Permissions.EXPENSE_MANAGEMENT)
+@permission_required(Permissions.EXPENSE_APPROVE)
 def expense_claim_action(cid):
     payload = request.get_json()
     action = payload.get("action") # APPROVE, REJECT
     
-    claim = ExpenseClaim.query.get(cid)
-    if not claim: return jsonify({"success": False, "message": "Not found"}), 404
+    claim = ExpenseClaim.query.filter_by(id=cid, company_id=g.user.company_id).first_or_404()
         
     if action == "APPROVE":
         claim.status = "APPROVED"
-        claim.approved_by = _user_id()
+        claim.approved_by = g.user.employee_profile.id if g.user.employee_profile else None
         claim.approved_at = datetime.utcnow()
     elif action == "REJECT":
         claim.status = "REJECTED"
@@ -146,20 +168,19 @@ def expense_claim_action(cid):
         
     db.session.commit()
     
-    log_action(
-        action=f"EXPENSE_CLAIM_{action}",
-        entity="ExpenseClaim",
-        entity_id=cid
-    )
-    
-    return _json_ok(None, f"Claim {action.lower()}ed")
+    return jsonify({"success": True, "message": f"Claim {action.lower()}ed successfully"})
 
-@expense_bp.get("/budget-utilization")
+@expense_bp.route("/budget-utilization", methods=['GET'])
 @token_required
-@permission_required(Permissions.EXPENSE_MANAGEMENT)
 def expense_budget():
-    # Mock data for UI as it depends on budgets not yet implemented
-    return _json_ok([
-        {"department": "Marketing Dept", "utilization": 80},
-        {"department": "Sales Operations", "utilization": 42}
-    ])
+    # Only Management should see budget utilization
+    if not is_management():
+        return jsonify({"success": True, "data": []})
+
+    return jsonify({
+        "success": True,
+        "data": [
+            {"department": "Marketing Dept", "utilization": 80},
+            {"department": "Sales Operations", "utilization": 42}
+        ]
+    })
