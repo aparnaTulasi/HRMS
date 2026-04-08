@@ -125,6 +125,44 @@ def _get_role_dashboard_stats():
         # Pending Approvals
         pending_leaves = LeaveRequest.query.filter(LeaveRequest.employee_id.in_(team_ids), LeaveRequest.status == 'Pending').count()
 
+        # Generate personal stats (like employee role)
+        emp = Employee.query.filter_by(user_id=user_id).first()
+        status = "Absent"
+        in_time = "--:--"
+        out_time = "--:--"
+        logged_hours = "0h 0m"
+        shift_str = "No Shift Assigned"
+        total_balance = 0
+        personal_pending_leaves = 0
+        pending_tasks = 0
+        next_holiday_str = "No upcoming holidays"
+        
+        if emp:
+            att = Attendance.query.filter_by(employee_id=emp.id, attendance_date=today).first()
+            if att:
+                status = att.status
+                if att.punch_in_time: in_time = att.punch_in_time.strftime("%I:%M %p")
+                if att.punch_out_time: out_time = att.punch_out_time.strftime("%I:%M %p")
+                total_mins = att.total_minutes
+                if total_mins > 0:
+                    h = total_mins // 60
+                    m = total_mins % 60
+                    logged_hours = f"{h}h {m}m"
+
+            shift_assign = ShiftAssignment.query.filter_by(employee_id=emp.id).first()
+            if shift_assign and shift_assign.shift:
+                s = shift_assign.shift
+                shift_str = f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}"
+
+            balances = LeaveBalance.query.filter_by(employee_id=emp.id).all()
+            total_balance = sum([(b.balance or 0.0) for b in balances])
+            personal_pending_leaves = LeaveRequest.query.filter_by(employee_id=emp.id, status='Pending').count()
+            pending_tasks = Task.query.filter_by(assigned_to_employee_id=emp.id, status='Pending').count()
+
+            next_holiday_obj = Holiday.query.filter(Holiday.date >= today).order_by(Holiday.date).first()
+            if next_holiday_obj:
+                next_holiday_str = f"{next_holiday_obj.date.strftime('%b %d')} ({next_holiday_obj.name})"
+
         return jsonify({
             "success": True,
             "role": "MANAGER",
@@ -139,6 +177,20 @@ def _get_role_dashboard_stats():
                 "pending_actions": {
                     "approvals": pending_leaves,
                     "attendance_corrections": 0  # Placeholder if not implemented
+                },
+                # Add personal UI payload compatible with "My Space" and Employee Dashboard
+                "at_a_glance": {
+                    "status": status,
+                    "shift": shift_str,
+                    "in_time": in_time,
+                    "out_time": out_time,
+                    "logged_hours": logged_hours
+                },
+                "stats": {
+                    "leave_balance": total_balance,
+                    "pending_leaves": personal_pending_leaves,
+                    "action_required_tasks": pending_tasks,
+                    "next_holiday": next_holiday_str
                 }
             }
         })

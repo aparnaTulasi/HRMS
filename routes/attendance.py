@@ -204,6 +204,14 @@ def list_attendance():
     if g.user.role != 'SUPER_ADMIN':
         q = q.filter(Employee.company_id == g.user.company_id)
 
+    # Allow MANAGER to view ONLY subordinates' attendance
+    if g.user.role == 'MANAGER':
+        if g.user.employee_profile:
+            q = q.filter(Employee.manager_id == g.user.employee_profile.id)
+        else:
+            # If a manager has no employee profile, they should see no team attendance
+            q = q.filter(Employee.manager_id == -1) 
+
     if department:
         q = q.filter(Employee.department == department)
 
