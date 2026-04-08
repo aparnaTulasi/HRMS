@@ -122,18 +122,18 @@ def admin_list_documents():
         q = q.filter(EmployeeDocument.uploaded_by_role.in_(['HR', 'EMPLOYEE']))
     elif role == 'HR':
         q = q.filter(EmployeeDocument.uploaded_by_role == 'EMPLOYEE')
-    # Allow MANAGER to view subordinates' documents
-    elif role == 'MANAGER' and current_emp_id:
-        q = q.filter(Employee.manager_id == current_emp_id)
+    elif role == 'MANAGER':
+        # Filter for subordinates only
+        subordinate_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id).all()]
+        q = q.filter(EmployeeDocument.employee_id.in_(subordinate_ids))
     else:
         return jsonify({"success": False, "message": "Unauthorized"}), 403
         
-    docs = q.order_by(EmployeeDocument.created_at.desc()).all()
+    docs = q.all()
     output = []
     for d in docs:
         output.append({
             "id": d.id,
-            "employee_id": d.employee.employee_id if d.employee else "", # Added employee_id for UI usage
             "employee_name": d.employee.full_name if d.employee else "N/A",
             "document_name": d.document_name,
             "document_type": d.document_type,
@@ -323,7 +323,7 @@ def admin_list_policies():
     """
     Full list of policies for Management.
     """
-    if g.user.role not in ['HR', 'ADMIN', 'SUPER_ADMIN']:
+    if g.user.role not in ['HR', 'ADMIN', 'SUPER_ADMIN', 'MANAGER']:
         return jsonify({"success": False, "message": "Access denied"}), 403
         
     policies = HRDocument.query.filter_by(company_id=g.user.company_id).all()
@@ -355,17 +355,19 @@ def download_any_document(doc_id):
         doc = EmployeeDocument.query.get_or_404(doc_id)
         current_emp_id = g.user.employee_profile.id if g.user.employee_profile else None
         
-        # Determine if the user is authorized to download
-        is_owner = doc.employee_id == current_emp_id
-        is_admin_hr = g.user.role in ['HR', 'ADMIN', 'SUPER_ADMIN']
-        
-        is_manager_of_subordinate = False
-        if g.user.role == 'MANAGER' and current_emp_id and doc.employee:
-            is_manager_of_subordinate = doc.employee.manager_id == current_emp_id
-            
-        if not (is_owner or is_admin_hr or is_manager_of_subordinate):
+        is_authorized = False
+        if doc.employee_id == current_emp_id:
+            is_authorized = True
+        elif g.user.role in ['HR', 'ADMIN', 'SUPER_ADMIN']:
+            is_authorized = True
+        elif g.user.role == 'MANAGER':
+            # Check if this doc belongs to a subordinate
+            sub_exists = Employee.query.filter_by(id=doc.employee_id, manager_id=g.user.id).first()
+            if sub_exists:
+                is_authorized = True
+
+        if not is_authorized:
             return jsonify({"message": "Access denied"}), 403
-            
         content, name = doc.file_content, doc.document_name
             
     if not content:

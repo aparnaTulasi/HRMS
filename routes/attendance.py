@@ -204,14 +204,6 @@ def list_attendance():
     if g.user.role != 'SUPER_ADMIN':
         q = q.filter(Employee.company_id == g.user.company_id)
 
-    # Allow MANAGER to view ONLY subordinates' attendance
-    if g.user.role == 'MANAGER':
-        if g.user.employee_profile:
-            q = q.filter(Employee.manager_id == g.user.employee_profile.id)
-        else:
-            # If a manager has no employee profile, they should see no team attendance
-            q = q.filter(Employee.manager_id == -1) 
-
     if department:
         q = q.filter(Employee.department == department)
 
@@ -907,10 +899,13 @@ def bulk_list_attendance_employees():
     if g.user.role == 'SUPER_ADMIN':
         company_id = request.args.get("company_id") or company_id
 
-    # 1. Get all active employees for the company
+    # 1. Get all active employees for the company (Filter by manager if role is MANAGER)
     emp_query = Employee.query
     if company_id:
         emp_query = emp_query.filter_by(company_id=company_id)
+    
+    if g.user.role == 'MANAGER':
+        emp_query = emp_query.filter_by(manager_id=g.user.id)
     
     employees = emp_query.all()
 
@@ -1077,7 +1072,12 @@ def dashboard_stats():
 
     # 1. Summary Counts
     att_query = Attendance.query.filter_by(attendance_date=today)
-    if company_id:
+    
+    if g.user.role == 'MANAGER':
+        # Filter by manager's team
+        team_member_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id, is_active=True).all()]
+        att_query = att_query.filter(Attendance.employee_id.in_(team_member_ids))
+    elif company_id:
         att_query = att_query.filter_by(company_id=company_id)
     
     att_today = att_query.all()

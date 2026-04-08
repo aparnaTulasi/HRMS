@@ -19,16 +19,25 @@ def get_leave_dashboard_summary():
     company_id = g.user.company_id
     
     # 1. Summary Counts
-    pending = LeaveRequest.query.filter_by(company_id=company_id, status='Pending').count()
-    approved = LeaveRequest.query.filter_by(company_id=company_id, status='Approved').count()
-    rejected = LeaveRequest.query.filter_by(company_id=company_id, status='Rejected').count()
-    
-    # Total balance aggregation across all employees
-    total_balance = db.session.query(func.sum(LeaveBalance.balance)).filter(
-        LeaveBalance.employee_id.in_(
-            db.session.query(Employee.id).filter_by(company_id=company_id)
-        )
-    ).scalar() or 0
+    if g.user.role == 'MANAGER':
+        subordinate_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id).all()]
+        pending = LeaveRequest.query.filter(LeaveRequest.employee_id.in_(subordinate_ids), LeaveRequest.status == 'Pending').count()
+        approved = LeaveRequest.query.filter(LeaveRequest.employee_id.in_(subordinate_ids), LeaveRequest.status == 'Approved').count()
+        rejected = LeaveRequest.query.filter(LeaveRequest.employee_id.in_(subordinate_ids), LeaveRequest.status == 'Rejected').count()
+        
+        total_balance = db.session.query(func.sum(LeaveBalance.balance)).filter(
+            LeaveBalance.employee_id.in_(subordinate_ids)
+        ).scalar() or 0
+    else:
+        pending = LeaveRequest.query.filter_by(company_id=company_id, status='Pending').count()
+        approved = LeaveRequest.query.filter_by(company_id=company_id, status='Approved').count()
+        rejected = LeaveRequest.query.filter_by(company_id=company_id, status='Rejected').count()
+        
+        total_balance = db.session.query(func.sum(LeaveBalance.balance)).filter(
+            LeaveBalance.employee_id.in_(
+                db.session.query(Employee.id).filter_by(company_id=company_id)
+            )
+        ).scalar() or 0
     
     # 2. Entitlement Progress Bars (Averaged/Aggregated for the company)
     entitlements = []
@@ -96,12 +105,19 @@ def get_leave_dashboard_trends():
         else:
             end_date = datetime(current_year, m + 1, 1)
             
-        count = db.session.query(func.count(LeaveRequest.id)).filter(
-            LeaveRequest.company_id == company_id,
+        count_query = db.session.query(func.count(LeaveRequest.id)).filter(
             LeaveRequest.status == 'Approved',
             LeaveRequest.from_date >= start_date.date(),
             LeaveRequest.from_date < end_date.date()
-        ).scalar() or 0
+        )
+        
+        if g.user.role == 'MANAGER':
+            subordinate_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id).all()]
+            count_query = count_query.filter(LeaveRequest.employee_id.in_(subordinate_ids))
+        else:
+            count_query = count_query.filter(LeaveRequest.company_id == company_id)
+
+        count = count_query.scalar() or 0
         
         trends.append({
             'month': month_names[m-1],
@@ -115,11 +131,18 @@ def get_leave_dashboard_trends():
 @permission_required(Permissions.LEAVE_VIEW)
 def get_leave_dashboard_recent():
     company_id = g.user.company_id
-    recent_requests = db.session.query(LeaveRequest, Employee, LeaveType).filter(
-        LeaveRequest.company_id == company_id,
+    query = db.session.query(LeaveRequest, Employee, LeaveType).filter(
         LeaveRequest.employee_id == Employee.id,
         LeaveRequest.leave_type_id == LeaveType.id
-    ).order_by(LeaveRequest.created_at.desc()).limit(5).all()
+    )
+
+    if g.user.role == 'MANAGER':
+        subordinate_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id).all()]
+        query = query.filter(LeaveRequest.employee_id.in_(subordinate_ids))
+    else:
+        query = query.filter(LeaveRequest.company_id == company_id)
+
+    recent_requests = query.order_by(LeaveRequest.created_at.desc()).limit(5).all()
         
     results = []
     for req, emp, lt in recent_requests:
