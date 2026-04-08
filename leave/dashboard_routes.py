@@ -189,13 +189,34 @@ def get_my_leave_dashboard_summary():
         LeaveType.code.in_(target_codes)
     ).all()
     
+    # Mapping for UI-friendly names
+    ui_labels = {
+        'SL': 'Sick',
+        'CL': 'Casual',
+        'EL': 'Privilege',
+        'PL': 'Privilege'
+    }
+    
     distribution = []
+    found_codes = set()
     for bal, lt in balances:
+        name = ui_labels.get(lt.code, lt.name.split('(')[0].strip())
         distribution.append({
-            'name': lt.name.split('(')[0].strip(), # "Sick Leave" instead of "Sick Leave (SL)"
+            'name': name,
             'code': lt.code,
             'value': round(float(bal.balance), 1)
         })
+        found_codes.add(lt.code)
+    
+    # Ensure all target sections exist even if 0
+    for code, label in ui_labels.items():
+        if code not in found_codes and code != 'PL': # PL/EL are merged
+            if code == 'EL' and 'PL' in found_codes: continue
+            distribution.append({
+                'name': label,
+                'code': code,
+                'value': 0.0
+            })
     
     # Calculate "Used"
     current_year = datetime.utcnow().year

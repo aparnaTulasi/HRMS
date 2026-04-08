@@ -804,7 +804,63 @@ def employee_payslip_pdf(payslip_id):
     return _generate_payslip_pdf(ps, f"payslip_{ps.pay_month}-{ps.pay_year}.pdf")
 
 
+@payroll_bp.get("/employee/form16")
+@token_required
+def employee_list_my_form16():
+    cid = _company_id()
+    if not hasattr(g.user, "employee_profile") or not g.user.employee_profile:
+        return jsonify({"success": False, "message": "Employee profile not found"}), 404
+    
+    emp_id = g.user.employee_profile.id
+    records = Form16.query.filter_by(employee_id=emp_id, company_id=cid).all()
+    return jsonify({"success": True, "data": [r.to_dict() for r in records]}), 200
+
+@payroll_bp.get("/employee/form16/<int:form16_id>/pdf")
+@token_required
+def employee_form16_pdf(form16_id):
+    cid = _company_id()
+    if not hasattr(g.user, "employee_profile") or not g.user.employee_profile:
+        return jsonify({"success": False, "message": "Employee profile not found"}), 404
+        
+    emp_id = g.user.employee_profile.id
+    record = Form16.query.filter_by(id=form16_id, employee_id=emp_id, company_id=cid).first()
+    if not record:
+        return jsonify({"success": False, "message": "Form-16 not found"}), 404
+        
+    return _generate_form16_pdf(record, f"form16_{record.fy}.pdf")
+
+@payroll_bp.get("/employee/fnf")
+@token_required
+def employee_get_my_fnf():
+    cid = _company_id()
+    if not hasattr(g.user, "employee_profile") or not g.user.employee_profile:
+        return jsonify({"success": False, "message": "Employee profile not found"}), 404
+        
+    emp_id = g.user.employee_profile.id
+    record = FullAndFinal.query.filter_by(employee_id=emp_id, company_id=cid).first()
+    if not record:
+        return jsonify({"success": False, "message": "F&F settlement details not found"}), 404
+        
+    return jsonify({"success": True, "data": record.to_dict()}), 200
+
+@payroll_bp.get("/employee/fnf/<int:fnf_id>/pdf")
+@token_required
+def employee_fnf_pdf(fnf_id):
+    cid = _company_id()
+    if not hasattr(g.user, "employee_profile") or not g.user.employee_profile:
+        return jsonify({"success": False, "message": "Employee profile not found"}), 404
+        
+    emp_id = g.user.employee_profile.id
+    record = FullAndFinal.query.filter_by(id=fnf_id, employee_id=emp_id, company_id=cid).first()
+    if not record:
+        return jsonify({"success": False, "message": "F&F settlement not found"}), 404
+        
+    # Restrict viewing if still in draft if necessary, but according to UI it seems fine
+    return _generate_fnf_pdf(record, f"fnf_settlement.pdf")
+
+
 def _generate_payslip_pdf(ps: PaySlip, download_name: str):
+
     from reportlab.lib.pagesizes import A4
     from reportlab.pdfgen import canvas
 
@@ -875,6 +931,118 @@ def _generate_payslip_pdf(ps: PaySlip, download_name: str):
     y -= 16
     c.setFont("Helvetica-Bold", 12)
     c.drawString(60, y, f"Net Salary: {ps.net_salary:.2f}")
+
+    c.save()
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=download_name)
+
+
+def _generate_form16_pdf(record: Form16, download_name: str):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    y = height - 50
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, y, "Form-16: Tax Certificate")
+    y -= 25
+
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, f"Financial Year: {record.fy}")
+    c.drawString(200, y, f"Assessment Year: {record.ay}")
+    y -= 14
+    c.drawString(50, y, f"Employee Name: {record.employee.full_name if record.employee else 'N/A'}")
+    y -= 14
+    c.drawString(50, y, f"PAN of Employee: {record.pan or 'N/A'}")
+    c.drawString(200, y, f"TAN of Employer: {record.tan or 'N/A'}")
+    y -= 24
+
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y, "Details of Tax Deducted at Source")
+    y -= 15
+    # Simplistic summary for now
+    c.drawString(60, y, "Summary from Part B:")
+    y -= 14
+    c.setFont("Helvetica", 11)
+    
+    # Safely access Part B data
+    part_b = record.part_b or {}
+    gross_income = part_b.get("gross_income", 0.0)
+    total_deductions = part_b.get("total_deductions", 0.0)
+    taxable_income = part_b.get("taxable_income", 0.0)
+    tax_on_income = part_b.get("tax_on_total_income", 0.0)
+
+    c.drawString(70, y, f"1. Gross Salary: Rs {float(gross_income):,.2f}")
+    y -= 14
+    c.drawString(70, y, f"2. Total Deductions (Chapter VI-A): Rs {float(total_deductions):,.2f}")
+    y -= 14
+    c.drawString(70, y, f"3. Taxable Income: Rs {float(taxable_income):,.2f}")
+    y -= 14
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(70, y, f"4. Net Tax Payable: Rs {float(tax_on_income):,.2f}")
+
+    y -= 100
+    c.setFont("Helvetica-Oblique", 9)
+    c.drawString(50, y, "* This is a computer-generated summary of your Form-16 certificate.")
+
+    c.save()
+    buf.seek(0)
+    return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=download_name)
+
+
+def _generate_fnf_pdf(record: FullAndFinal, download_name: str):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    width, height = A4
+
+    y = height - 50
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, y, "Full and Final Settlement Statement")
+    y -= 25
+
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, f"Employee: {record.employee.full_name if record.employee else 'N/A'}")
+    c.drawString(300, y, f"Employee ID: {record.employee.employee_id if record.employee else 'N/A'}")
+    y -= 14
+    c.drawString(50, y, f"Last Working Day: {record.last_working_day.strftime('%d %b %Y') if record.last_working_day else '-'}")
+    c.drawString(300, y, f"Department: {record.employee.department if record.employee else '-'}")
+    y -= 24
+
+    settlement = record.settlement_data or {}
+    
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, y, "Settlement Summary")
+    y -= 18
+    c.setFont("Helvetica", 11)
+    
+    total_earnings = settlement.get("earnings", {}).get("total", 0.0)
+    total_deductions = settlement.get("deductions", {}).get("total", 0.0)
+    net_payable = float(total_earnings) - float(total_deductions)
+
+    c.drawString(60, y, f"Total Earnings Payable: Rs {float(total_earnings):,.2f}")
+    y -= 14
+    c.drawString(60, y, f"Total Recovery/Deductions: Rs {float(total_deductions):,.2f}")
+    y -= 18
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(60, y, f"Net Settlement Amount: Rs {net_payable:,.2f}")
+    
+    y -= 30
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, f"Notice Period Required: {record.notice_period_required or 0} days")
+    y -= 14
+    c.drawString(50, y, f"Notice Period Served: {record.notice_period_served or 0} days")
+    y -= 14
+    c.drawString(50, y, f"Notice Status: {record.notice_status or 'N/A'}")
+
+    y -= 100
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(50, y, "Settlement Status: " + (record.status.upper() if record.status else "PENDING"))
 
     c.save()
     buf.seek(0)

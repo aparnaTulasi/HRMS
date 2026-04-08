@@ -3,7 +3,7 @@ from datetime import datetime
 import json
 from . import leave_bp
 from .models import LeaveType, LeavePolicy, LeavePolicyMapping, LeaveRequest, HolidayCalendar, Holiday, EmployeeHolidayCalendar, LeaveBalance, LeaveLedger, LeaveEncashment
-from .services import select_policy_mapping, compute_entitlement, add_ledger, encash
+from .services import select_policy_mapping, compute_entitlement, add_ledger, encash, compute_units
 from .audit_logger import log_action
 from models import db
 from models.employee import Employee
@@ -1262,20 +1262,17 @@ def get_my_leaves():
     if not emp:
         return jsonify({'message': 'Employee profile not found'}), 404
 
-    query = LeaveRequest.query.filter_by(employee_id=emp.id)
+    search = request.args.get('search')
+    if search:
+        search_filter = f"%{search}%"
+        query = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id).filter(
+            (LeaveRequest.reason.ilike(search_filter)) | 
+            (LeaveType.name.ilike(search_filter))
+        )
 
-    status = request.args.get('status')
-    if status:
-        query = query.filter(LeaveRequest.status == status)
-
-    from_date = parse_date(request.args.get('from'))
-    if from_date:
-        # Find leaves that overlap with the date range, not just fall within it
-        query = query.filter(LeaveRequest.to_date >= from_date)
-
-    to_date = parse_date(request.args.get('to'))
-    if to_date:
-        query = query.filter(LeaveRequest.from_date <= to_date)
+    leave_type_id = request.args.get('leave_type_id', type=int)
+    if leave_type_id:
+        query = query.filter(LeaveRequest.leave_type_id == leave_type_id)
 
     # Join with LeaveType to get the name for a richer response
     leaves_with_type = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
@@ -1288,6 +1285,13 @@ def get_my_leaves():
         data['leave_type_name'] = leave_type_name
         # Add human-readable applied date
         data['applied_on'] = leave_request.created_at.strftime('%b %d, %Y') if leave_request.created_at else "N/A"
+        
+        # Calculate days for display if not stored
+        if leave_request.from_date and leave_request.to_date:
+            data['days'] = (leave_request.to_date - leave_request.from_date).days + 1
+            if leave_request.is_half_day:
+                data['days'] = 0.5 if data['days'] == 1 else data['days'] - 0.5
+        
         results.append(data)
 
     # Get current balances
@@ -1419,12 +1423,60 @@ def approve_leave(id):
     leave = LeaveRequest.query.get_or_404(id)
     if g.user.role != 'SUPER_ADMIN' and leave.company_id != g.user.company_id:
         return jsonify({'message': 'Unauthorized'}), 403
+    
     approver_emp = Employee.query.filter_by(user_id=g.user.id).first()
-    data = request.get_json()
-    leave.status = data.get('status', 'Approved')
+    data = request.get_json() or {}
+    new_status = data.get('status', 'Approved')
+    
+    if new_status == 'Approved' and leave.status != 'Approved':
+        # Deduct balance
+        success, err = _process_leave_balance_deduction(leave)
+        if not success:
+            return jsonify({'message': err}), 400
+
+    leave.status = new_status
     leave.approved_by = approver_emp.id if approver_emp else None
     db.session.commit()
+    
+    log_action(f"LEAVE_APPROVE", "leave_request", leave.id, 200, meta=json.dumps(data))
     return jsonify({'message': f'Leave {leave.status.lower()}'})
+
+def _process_leave_balance_deduction(leave):
+    """Internal helper to deduct balance and add ledger entry upon approval."""
+    emp = Employee.query.get(leave.employee_id)
+    if not emp: return False, "Employee not found"
+    
+    mapping = select_policy_mapping(leave.company_id, emp, leave.leave_type_id)
+    if not mapping:
+        # If no policy, fallback to simple calendar days
+        units = float((leave.to_date - leave.from_date).days + 1)
+        if leave.is_half_day:
+            units = 0.5 if units == 1 else units - 0.5
+    else:
+        units, _ = compute_units(leave.company_id, emp, mapping, leave.from_date, leave.to_date)
+        if leave.is_half_day:
+            units = 0.5 if units == 1 else units - 0.5
+    
+    # Check balance
+    bal = LeaveBalance.query.filter_by(employee_id=emp.id, leave_type_id=leave.leave_type_id).first()
+    if not bal or bal.balance < units:
+        return False, f"Insufficient leave balance. Required: {units}, Available: {bal.balance if bal else 0}"
+    
+    # Update Balance
+    bal.balance -= units
+    
+    # Add Ledger Entry
+    add_ledger(
+        company_id=leave.company_id,
+        employee_id=leave.employee_id,
+        leave_type_id=leave.leave_type_id,
+        txn_type='DEBIT',
+        units=units,
+        note=f"Approved Leave Request #{leave.id}",
+        request_id=leave.id
+    )
+    
+    return True, None
 
 @leave_bp.route('/<int:id>/action', methods=['PUT'])
 @token_required
@@ -1439,6 +1491,11 @@ def process_leave_action(id):
     action = data['action'].upper()
     if action not in ['APPROVE', 'REJECT']:
         return jsonify({'message': 'Invalid action. Allowed: APPROVE, REJECT'}), 400
+
+    if action == 'APPROVE' and leave.status != 'Approved':
+        success, err = _process_leave_balance_deduction(leave)
+        if not success:
+            return jsonify({'message': err}), 400
 
     approver = Employee.query.filter_by(user_id=g.user.id).first()
     leave.status = 'Approved' if action == 'APPROVE' else 'Rejected'

@@ -2,7 +2,7 @@
 
 ## 📅 Leave Calculation & Application
 ### 1. Calculate Leave Days
-- **URL**: `POST /leave/calculate-days`
+- **URL**: `POST /api/leaves/calculate-days`
 - **Desc**: Calculates working days between two dates, excluding company holidays and weekends.
 - **Payload**:
   ```json
@@ -16,7 +16,7 @@
 - **Response**: `{"total_units": 0.5}`
 
 ### 2. Apply for Leave
-- **URL**: `POST /leave/apply`
+- **URL**: `POST /api/leaves/apply`
 - **Desc**: Submits a leave request. Supports half-day and attachments.
 - **Payload**:
   ```json
@@ -35,7 +35,7 @@
 
 ## 📊 Dashboard (Employee View)
 ### 3. Dashboard Summary
-- **URL**: `GET /leave/my-dashboard/summary`
+- **URL**: `GET /api/leaves/my-dashboard/summary`
 - **Desc**: Overall counts (Pending, Approved, Rejected) and Balance Distribution (Sick, Casual, etc.).
 - **Response**:
   ```json
@@ -46,12 +46,12 @@
   ```
 
 ### 4. Leave Trends
-- **URL**: `GET /leave/my-dashboard/trends`
+- **URL**: `GET /api/leaves/my-dashboard/trends`
 - **Desc**: Monthly count of approved leaves for the current year.
 - **Response**: `[{"month": "Jan", "leaves": 2}, ...]`
 
 ### 5. Recent Requests
-- **URL**: `GET /leave/my-dashboard/recent`
+- **URL**: `GET /api/leaves/my-dashboard/recent`
 - **Desc**: 5 most recent requests with status.
 - **Response**: `[{"id": 1, "type": "Sick Leave", "period": "Apr 01 - Apr 01", "days": "0.5d", "status": "Pending"}]`
 
@@ -59,8 +59,8 @@
 
 ## 🕒 History & Balances
 ### 6. My History & Current Balances
-- **URL**: `GET /leave/mine`
-- **Desc**: Combined view of all past leave requests and current balances.
+- **URL**: `GET /api/leaves/mine`
+- **Desc**: Combined view of all past leave requests and current balances. Supports `search`, `status`, `from`, `to`, and `leave_type_id` filters.
 - **Response**:
   ```json
   {
@@ -70,6 +70,6 @@
   ```
 
 ### 7. Standalone Balance
-- **URL**: `GET /leave/balance`
+- **URL**: `GET /api/leaves/balance`
 - **Desc**: Current balances only.
 - **Response**: `[{"leave_type_name": "Sick Leave", "balance": 10.0}, ...]`
