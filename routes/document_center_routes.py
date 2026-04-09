@@ -9,6 +9,7 @@ from models.notification import Notification
 from utils.decorators import token_required, permission_required
 from constants.permissions_registry import Permissions
 from datetime import datetime
+from utils.notification_utils import create_notification
 
 doc_center_bp = Blueprint('document_center', __name__)
 
@@ -209,8 +210,10 @@ def admin_verify_document(doc_id):
     doc.verified_date = datetime.utcnow()
     
     message = f"Your document '{doc.document_name}' has been {status} by {g.user.role}."
-    notif = Notification(user_id=doc.employee.user_id if doc.employee else None, message=message)
-    db.session.add(notif)
+    create_notification(
+        user_id=doc.employee.user_id if doc.employee else None,
+        message=message
+    )
     db.session.commit()
     return jsonify({"success": True, "message": f"Document {status.lower()} successfully"}), 200
 

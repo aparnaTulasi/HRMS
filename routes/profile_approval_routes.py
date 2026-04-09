@@ -12,9 +12,7 @@ from datetime import datetime
 
 profile_approval_bp = Blueprint('profile_approval', __name__)
 
-def create_notification(user_id, role, message):
-    notif = Notification(user_id=user_id, role=role, message=message)
-    db.session.add(notif)
+from utils.notification_utils import create_notification
 
 @profile_approval_bp.route('/api/approvals/profile-changes', methods=['GET'])
 @token_required

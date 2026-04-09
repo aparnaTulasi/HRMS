@@ -61,6 +61,7 @@ from routes.desk_routes import desk_bp
 from routes.delegation_routes import delegation_bp
 from routes.document_center_routes import doc_center_bp
 from routes.main_routes import main_bp
+from routes.notification_routes import notification_bp
 from routes.desk_routes import desk_bp
 from routes.document_center_routes import doc_center_bp
 
@@ -149,6 +150,7 @@ app.register_blueprint(desk_bp, url_prefix='/api/desk')
 app.register_blueprint(delegation_bp, url_prefix='/api/delegation')
 app.register_blueprint(delegation_bp, url_prefix='/api/administration/delegations', name="delegation_mgmt_alias")
 app.register_blueprint(doc_center_bp, url_prefix='/api/document-center')
+app.register_blueprint(notification_bp, url_prefix='/api/notifications')
 app.register_blueprint(main_bp)
 
 @app.route('/')

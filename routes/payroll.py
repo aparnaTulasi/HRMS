@@ -8,6 +8,7 @@ from models import db
 from utils.decorators import token_required, permission_required
 from constants.permissions_registry import Permissions
 from utils.date_utils import parse_date
+from utils.notification_utils import create_notification
 from models.payroll import (
     PayGrade, PayRole, PaySlip, PayrollChangeRequest, SalaryStructureAssignment,
     PayslipEarning, PayslipDeduction, PayslipEmployerContribution, PayslipReimbursement,
@@ -503,6 +504,14 @@ def admin_create_payslip():
     db.session.add(ps)
     try:
         db.session.commit()
+        # Notify the employee
+        target_employee = Employee.query.get(ps.employee_id)
+        if target_employee and target_employee.user_id:
+            create_notification(
+                user_id=target_employee.user_id,
+                message=f"A new payslip for {calendar.month_name[ps.pay_month]} {ps.pay_year} has been created."
+            )
+            db.session.commit()
     except Exception as e:
         db.session.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
@@ -573,6 +582,14 @@ def admin_generate_payslip():
     db.session.add(ps)
     try:
         db.session.commit()
+        # Notify the employee
+        target_employee = Employee.query.get(ps.employee_id)
+        if target_employee and target_employee.user_id:
+            create_notification(
+                user_id=target_employee.user_id,
+                message=f"Your payslip for {calendar.month_name[ps.pay_month]} {ps.pay_year} has been generated."
+            )
+            db.session.commit()
     except Exception as e:
         db.session.rollback()
         return jsonify({"success": False, "message": str(e)}), 400
