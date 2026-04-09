@@ -8,14 +8,8 @@ from models.asset import Asset, AssetAllocation, AssetConditionLog
 assets_bp = Blueprint("assets_bp", __name__)
 
 # ---------- Optional auth imports (won't break if not present) ----------
-def _no_auth(fn):
-    return fn
-
-try:
-    # If your project has something like these, it will use it
-    from utils.auth import token_required  # type: ignore
-except Exception:
-    token_required = _no_auth
+from utils.decorators import token_required, permission_required
+from constants.permissions_registry import Permissions
 
 # ---------------- Helpers ----------------
 def _json_error(msg, code=400):
@@ -77,6 +71,7 @@ def _log_to_dict(l: AssetConditionLog):
 
 @assets_bp.route("", methods=["POST"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def create_asset():
     data = request.get_json(silent=True) or {}
 
@@ -122,6 +117,7 @@ def create_asset():
 
 @assets_bp.route("/bulk-upload", methods=["POST"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def bulk_create_assets():
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
@@ -187,6 +183,7 @@ def bulk_create_assets():
 @assets_bp.route("", methods=["GET"])
 @assets_bp.route("/search", methods=["GET"])
 @token_required
+@permission_required(Permissions.ASSET_VIEW)
 def list_assets():
     args = request.args
     company_id = args.get("company_id", type=int)
@@ -223,6 +220,7 @@ def list_assets():
 
 @assets_bp.route("/stats", methods=["GET"])
 @token_required
+@permission_required(Permissions.ASSET_VIEW)
 def asset_stats():
     company_id = request.args.get("company_id", type=int)
     
@@ -267,6 +265,7 @@ def asset_stats():
 
 @assets_bp.route("/<int:asset_id>", methods=["GET"])
 @token_required
+@permission_required(Permissions.ASSET_VIEW)
 def get_asset(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:
@@ -276,6 +275,7 @@ def get_asset(asset_id):
 
 @assets_bp.route("/<int:asset_id>", methods=["PUT"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def update_asset(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:
@@ -302,6 +302,7 @@ def update_asset(asset_id):
 
 @assets_bp.route("/<int:asset_id>", methods=["DELETE"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def deactivate_asset(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:
@@ -319,6 +320,7 @@ def deactivate_asset(asset_id):
 
 @assets_bp.route("/<int:asset_id>/issue", methods=["POST"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def issue_asset(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:
@@ -358,6 +360,7 @@ def issue_asset(asset_id):
 
 @assets_bp.route("/<int:asset_id>/transfer", methods=["POST"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def transfer_asset(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:
@@ -412,6 +415,7 @@ def transfer_asset(asset_id):
 
 @assets_bp.route("/allocations/<int:allocation_id>/return", methods=["POST"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def return_asset(allocation_id):
     alloc = AssetAllocation.query.get(allocation_id)
     if not alloc:
@@ -439,6 +443,7 @@ def return_asset(allocation_id):
 
 @assets_bp.route("/allocations", methods=["GET"])
 @token_required
+@permission_required(Permissions.ASSET_VIEW)
 def list_allocations():
     company_id = request.args.get("company_id", type=int)
     employee_id = request.args.get("employee_id", type=int)
@@ -458,6 +463,7 @@ def list_allocations():
 
 @assets_bp.route("/by-employee/<int:employee_id>", methods=["GET"])
 @token_required
+@permission_required(Permissions.ASSET_VIEW)
 def assets_by_employee(employee_id):
     # Current assigned assets for an employee
     rows = AssetAllocation.query.filter_by(employee_id=employee_id, status="Assigned").order_by(AssetAllocation.id.desc()).all()
@@ -470,6 +476,7 @@ def assets_by_employee(employee_id):
 
 @assets_bp.route("/<int:asset_id>/condition-logs", methods=["POST"])
 @token_required
+@permission_required(Permissions.ASSET_MANAGEMENT)
 def add_condition_log(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:
@@ -499,6 +506,7 @@ def add_condition_log(asset_id):
 
 @assets_bp.route("/<int:asset_id>/condition-logs", methods=["GET"])
 @token_required
+@permission_required(Permissions.ASSET_VIEW)
 def list_condition_logs(asset_id):
     a = Asset.query.get(asset_id)
     if not a or not a.is_active:

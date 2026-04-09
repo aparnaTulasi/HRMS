@@ -59,6 +59,11 @@ class Permissions:
     VISITOR_APPROVE = "VISITOR_APPROVE"
     VISITOR_LOG_MANAGE = "VISITOR_LOG_MANAGE"
     VISITOR_REPORT = "VISITOR_REPORT"
+    AUDIT_VIEW = "AUDIT_VIEW"
+
+    # --- Asset Management ---
+    ASSET_VIEW = "ASSET_VIEW"
+    ASSET_MANAGEMENT = "ASSET_MANAGEMENT"
 
     # --- Desk Management ---
     DESK_VIEW = "DESK_VIEW"

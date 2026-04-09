@@ -1843,10 +1843,18 @@ def get_payroll_dashboard():
     if user_role == "HR":
         q = q.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
         q = q.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    elif user_role == "MANAGER":
+        manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
+        if manager_emp:
+            sub_ids = [e.id for e in Employee.query.filter_by(manager_id=manager_emp.id).all()]
+            sub_ids.append(manager_emp.id)
+            q = q.filter(PaySlip.employee_id.in_(sub_ids))
+        else:
+            q = q.filter(PaySlip.id == -1)
     payslips = q.all()
 
     total_payout = sum(ps.net_salary for ps in payslips)
-    processed_count = sum(1 for ps in payslips if ps.status == "FINAL")
+    processed_count = sum(1 for ps in payslips if ps.status in ["FINAL", "PAID", "COMPLETED"])
     draft_count = sum(1 for ps in payslips if ps.status == "DRAFT")
     avg_salary = total_payout / len(payslips) if payslips else 0
 
@@ -1862,6 +1870,14 @@ def get_payroll_dashboard():
     if user_role == "HR":
         pq = pq.join(Employee, PaySlip.employee_id == Employee.id).join(User, Employee.user_id == User.id)
         pq = pq.filter(User.role.in_(["MANAGER", "EMPLOYEE"]))
+    elif user_role == "MANAGER":
+        manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
+        if manager_emp:
+            sub_ids = [e.id for e in Employee.query.filter_by(manager_id=manager_emp.id).all()]
+            sub_ids.append(manager_emp.id)
+            pq = pq.filter(PaySlip.employee_id.in_(sub_ids))
+        else:
+            pq = pq.filter(PaySlip.id == -1)
     prev_payslips = pq.all()
     prev_payout = sum(ps.net_salary for ps in prev_payslips)
     

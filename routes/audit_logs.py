@@ -70,7 +70,7 @@ def _generate_details(log, user):
 @token_required
 def get_audit_logs():
     # Role check
-    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
+    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN', 'MANAGER']:
         return jsonify({"message": "Unauthorized"}), 403
 
     query = db.session.query(AuditLog, User).outerjoin(User, AuditLog.user_id == User.id)
@@ -87,6 +87,18 @@ def get_audit_logs():
     if request.args.get("entity"):
         query = query.filter(AuditLog.entity.ilike(f'%{request.args["entity"]}%'))
     
+    # Manager Filter: Self and Subordinates only
+    if g.user.role == "MANAGER":
+        from models.employee import Employee
+        manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
+        if manager_emp:
+            subordinate_user_ids = [e.user_id for e in Employee.query.filter_by(manager_id=manager_emp.id).all() if e.user_id]
+            allowed_user_ids = [g.user.id] + subordinate_user_ids
+            query = query.filter(AuditLog.user_id.in_(allowed_user_ids))
+        else:
+            # If no employee profile, see nothing
+            query = query.filter(AuditLog.id == -1)
+    
     # Module filter
     module_filter = request.args.get("module")
     
@@ -100,6 +112,20 @@ def get_audit_logs():
         log_module = _get_module(log.entity)
         if module_filter and module_filter.lower() != log_module.lower():
             continue
+            
+        # Manager Module Check: Limit to modules they have access to
+        if g.user.role == "MANAGER":
+            from constants.permissions_registry import Permissions
+            authorized_modules = set()
+            perms = [p.permission_code for p in g.user.permissions]
+            
+            if Permissions.EMPLOYEE_VIEW in perms: authorized_modules.add('Employee')
+            if Permissions.PAYROLL_VIEW in perms: authorized_modules.add('Finance')
+            if Permissions.ATTENDANCE_VIEW in perms: authorized_modules.add('Employee')
+            if Permissions.LEAVE_VIEW in perms: authorized_modules.add('Employee')
+            
+            if log_module not in authorized_modules and log_module != 'Auth':
+                continue
             
         performer_name = "System"
         if user:
