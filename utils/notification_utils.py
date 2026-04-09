@@ -4,6 +4,28 @@ import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
+from models import db
+from models.notification import Notification
+
+def create_notification(user_id=None, role=None, message=""):
+    """
+    Creates an in-app notification record in the database.
+    Can be targeted to a specific user_id or a broader role.
+    """
+    try:
+        notif = Notification(
+            user_id=user_id,
+            role=role,
+            message=message,
+            created_at=datetime.utcnow(),
+            is_read=False
+        )
+        db.session.add(notif)
+        db.session.flush() # Flush to ensure it's part of the transaction
+        return True
+    except Exception as e:
+        print(f"Error creating notification: {e}")
+        return False
 
 def send_async_email(msg):
     """Sends email in a separate thread to avoid blocking the main application."""

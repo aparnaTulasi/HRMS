@@ -9,8 +9,9 @@ import logging
 dept_bp = Blueprint('department_management', __name__)
 
 @dept_bp.route('/departments', methods=['GET'])
+@dept_bp.route('/list', methods=['GET'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
 def list_departments():
     try:
         if g.user.role == 'SUPER_ADMIN':
@@ -51,7 +52,7 @@ def list_departments():
 
 @dept_bp.route('/departments', methods=['POST'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
 def create_department():
     try:
         data = request.get_json()
@@ -98,7 +99,7 @@ def create_department():
 
 @dept_bp.route('/departments/<int:dept_id>', methods=['PUT', 'PATCH'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
 def update_department(dept_id):
     try:
         dept = Department.query.get(dept_id)
@@ -132,7 +133,7 @@ def update_department(dept_id):
 
 @dept_bp.route('/departments/<int:dept_id>', methods=['DELETE'])
 @token_required
-@role_required(['SUPER_ADMIN', 'ADMIN', 'HR'])
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
 def deactivate_department(dept_id):
     """Mark a department as INACTIVE instead of deleting."""
     try:
@@ -152,6 +153,46 @@ def deactivate_department(dept_id):
         log_action("DEACTIVATE_DEPARTMENT", "Department", dept.id, 200, meta={"name": dept.department_name})
         
         return jsonify({"success": True, "message": f"Department '{dept.department_name}' deactivated successfully"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "message": str(e)}), 500
+
+@dept_bp.route('/assign-member', methods=['POST'])
+@token_required
+@role_required(['SUPER_ADMIN', 'ADMIN', 'HR', 'MANAGER'])
+def assign_member_to_department():
+    """Assigns an employee to a department."""
+    try:
+        data = request.get_json()
+        emp_id = data.get('employee_id')
+        dept_id = data.get('department_id')
+
+        if not emp_id or not dept_id:
+            return jsonify({"success": False, "message": "employee_id and department_id are required"}), 400
+
+        emp = Employee.query.get(emp_id)
+        dept = Department.query.get(dept_id)
+
+        if not emp or not dept:
+            return jsonify({"success": False, "message": "Employee or Department not found"}), 404
+
+        # Access check
+        if g.user.role != 'SUPER_ADMIN':
+            if emp.company_id != g.user.company_id or dept.company_id != g.user.company_id:
+                return jsonify({"success": False, "message": "Unauthorized"}), 403
+
+        # Update employee department
+        emp.department = dept.department_name
+        # Note: If there's a department_id field in Employee, it should also be updated.
+        # But based on our research, it's currently a String field.
+
+        db.session.commit()
+        
+        from utils.audit_logger import log_action
+        log_action("ASSIGN_DEPT_MEMBER", "Employee", emp.id, 200, meta={"employee_id": emp.id, "dept": dept.department_name})
+        
+        return jsonify({"success": True, "message": f"Employee '{emp.full_name}' assigned to '{dept.department_name}' successfully"}), 200
 
     except Exception as e:
         db.session.rollback()

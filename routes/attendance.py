@@ -11,6 +11,7 @@ from models.user import User
 from models.shift import Shift, ShiftAssignment
 from utils.decorators import token_required, role_required, permission_required
 from constants.permissions_registry import Permissions
+from utils.authority_utils import is_authorized_delegate
 from utils.audit_logger import log_action
 
 from sqlalchemy import func
@@ -46,7 +47,7 @@ def get_shifts():
     
     return jsonify({
         "success": True,
-        "shifts": output
+        "data": output
     })
 
 # DEPRECATED: Use @permission_required instead
@@ -787,6 +788,31 @@ def my_regularization_requests():
         })
     return jsonify({"requests": output}), 200
 
+@attendance_bp.route("/regularization/stats", methods=["GET"])
+@token_required
+def get_regularization_stats():
+    """
+    Returns counts for Total, Pending, Approved, and Rejected requests for the team.
+    """
+    q = AttendanceRegularization.query
+    if g.user.role == 'MANAGER':
+        team_member_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id, is_active=True).all()]
+        q = q.filter(AttendanceRegularization.employee_id.in_(team_member_ids))
+    elif g.user.role != 'SUPER_ADMIN':
+        q = q.filter_by(company_id=g.user.company_id)
+        
+    total = q.count()
+    pending = q.filter_by(status='PENDING').count()
+    approved = q.filter_by(status='APPROVED').count()
+    rejected = q.filter_by(status='REJECTED').count()
+    
+    return jsonify({
+        "total": total,
+        "pending": pending,
+        "approved": approved,
+        "rejected": rejected
+    }), 200
+
 @attendance_bp.route("/regularization/pending", methods=["GET"])
 @token_required
 @permission_required(Permissions.ATTENDANCE_APPROVE)
@@ -796,32 +822,46 @@ def pending_regularization_requests():
 
     q = AttendanceRegularization.query
     
-    # Super Admin sees all, others see only their company
-    if g.user.role != 'SUPER_ADMIN':
+    # Super Admin sees all, Manager sees team, others see only their company
+    if g.user.role == 'MANAGER':
+        from models.delegation import Delegation
+        today = date.today()
+        delegators = db.session.query(Delegation.delegated_by_id).filter(
+            Delegation.delegated_to_id == g.user.id,
+            Delegation.status == 'ACTIVE',
+            Delegation.start_date <= today,
+            Delegation.end_date >= today,
+            (Delegation.module == 'Attendance Approval') | (Delegation.module == 'All')
+        ).all()
+        delegator_ids = [d[0] for d in delegators]
+        
+        manager_ids = [g.user.id] + delegator_ids
+        
+        # Filter all employees belonging to any of these managers
+        team_member_ids = [e.id for e in Employee.query.filter(Employee.manager_id.in_(manager_ids), Employee.is_active == True).all()]
+        q = q.filter(AttendanceRegularization.employee_id.in_(team_member_ids))
+    elif g.user.role != 'SUPER_ADMIN':
         q = q.filter_by(company_id=g.user.company_id)
 
     # Filters
-    status = request.args.get("status", "PENDING")
-    if status:
-        q = q.filter_by(status=status)
+    status_filter = request.args.get("status", "PENDING").upper()
+    if status_filter != "ALL":
+        q = q.filter_by(status=status_filter)
 
     rows = q.order_by(AttendanceRegularization.created_at.desc()).all()
     
     output = []
     for r in rows:
-        # Fetch current status
-        att = Attendance.query.filter_by(employee_id=r.employee_id, attendance_date=r.attendance_date).first()
-        current_status = att.status if att else "Absent"
-
         output.append({
             "request_id": r.id,
             "employee_id": r.employee.employee_id if r.employee else "",
             "employee_name": r.employee.full_name if r.employee else "Unknown",
             "attendance_date": r.attendance_date.strftime("%Y-%m-%d"),
-            "current_status": current_status,
+            "request_type": r.request_type or "Missing Punch",
+            "punch_type": r.punch_type or "Both",
+            "actual_time": r.actual_time or "-",
+            "requested_time": r.requested_punch_in.strftime("%I:%M %p") if r.requested_punch_in else (r.requested_punch_out.strftime("%I:%M %p") if r.requested_punch_out else "-"),
             "requested_status": r.requested_status,
-            "requested_login_at": r.requested_punch_in.strftime("%I:%M %p") if r.requested_punch_in else None,
-            "requested_logout_at": r.requested_punch_out.strftime("%I:%M %p") if r.requested_punch_out else None,
             "reason": r.reason,
             "status": r.status
         })
@@ -836,7 +876,14 @@ def approve_regularization(request_id):
     data = request.get_json() or {}
     req = AttendanceRegularization.query.get_or_404(request_id)
     
-    if g.user.role != 'SUPER_ADMIN' and req.company_id != g.user.company_id:
+    if g.user.role == 'MANAGER':
+        # Normal check OR Delegation check
+        is_auth = (req.employee.manager_id == g.user.id) or \
+                  is_authorized_delegate(req.employee.manager_id, g.user.id, 'Attendance Approval')
+        
+        if not is_auth:
+            return jsonify({"message": "Unauthorized: This request does not belong to your team"}), 403
+    elif g.user.role != 'SUPER_ADMIN' and req.company_id != g.user.company_id:
         return jsonify({"message": "Unauthorized"}), 403
 
     req.status = "APPROVED"
@@ -868,13 +915,22 @@ def reject_regularization(request_id):
     data = request.get_json() or {}
     req = AttendanceRegularization.query.get_or_404(request_id)
 
-    if g.user.role != 'SUPER_ADMIN' and req.company_id != g.user.company_id:
+    if g.user.role == 'MANAGER':
+        # Normal check OR Delegation check
+        is_auth = (req.employee.manager_id == g.user.id) or \
+                  is_authorized_delegate(req.employee.manager_id, g.user.id, 'Attendance Approval')
+        
+        if not is_auth:
+            return jsonify({"message": "Unauthorized: This request does not belong to your team"}), 403
+    elif g.user.role != 'SUPER_ADMIN' and req.company_id != g.user.company_id:
         return jsonify({"message": "Unauthorized"}), 403
 
     req.status = "REJECTED"
     req.approved_by = g.user.id
     req.approver_comment = data.get("approver_comment")
-    
+    db.session.commit()
+    log_action("REJECT_REGULARIZATION", "AttendanceRegularization", req.id, 200, meta={"employee_id": req.employee_id, "date": str(req.attendance_date)})
+    return jsonify({"message": "Request rejected", "request_id": req.id}), 200
 @attendance_bp.route("/bulk-list", methods=["GET"])
 @token_required
 @permission_required(Permissions.ATTENDANCE_VIEW)
@@ -905,7 +961,7 @@ def bulk_list_attendance_employees():
         emp_query = emp_query.filter_by(company_id=company_id)
     
     if g.user.role == 'MANAGER':
-        emp_query = emp_query.filter_by(manager_id=g.user.id)
+        emp_query = emp_query.filter_by(manager_id=g.user.id, is_active=True)
     
     employees = emp_query.all()
 
@@ -933,8 +989,11 @@ def bulk_list_attendance_employees():
         })
 
     return jsonify({
-        "date": att_date.strftime("%Y-%m-%d"),
-        "employees": output
+        "success": True,
+        "data": {
+            "date": att_date.strftime("%Y-%m-%d"),
+            "employees": output
+        }
     }), 200
 
 @attendance_bp.route("/bulk-save", methods=["POST"])
@@ -1115,7 +1174,11 @@ def dashboard_stats():
         Attendance.attendance_date >= week_ago,
         Attendance.attendance_date <= today
     )
-    if company_id:
+    if g.user.role == 'MANAGER':
+        # Re-use team_member_ids if already defined, or re-fetch
+        team_member_ids = [e.id for e in Employee.query.filter_by(manager_id=g.user.id, is_active=True).all()]
+        trend_records = trend_records.filter(Attendance.employee_id.in_(team_member_ids))
+    elif company_id:
         trend_records = trend_records.filter_by(company_id=company_id)
     
     trend_data = trend_records.all()
@@ -1152,14 +1215,17 @@ def dashboard_stats():
         })
 
     return jsonify({
-        "summary": summary,
-        "shift_dist": shift_dist,
-        "trend": {
-            "labels": days,
-            "present": present_counts,
-            "absent": absent_counts
-        },
-        "overview": overview
+        "success": True,
+        "data": {
+            "summary": summary,
+            "shift_dist": shift_dist,
+            "trend": {
+                "labels": days,
+                "present": present_counts,
+                "absent": absent_counts
+            },
+            "overview": overview
+        }
     }), 200
 
 # -----------------------------

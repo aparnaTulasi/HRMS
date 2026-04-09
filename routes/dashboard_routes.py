@@ -111,25 +111,84 @@ def _get_role_dashboard_stats():
 
     # --- 2. MANAGER DASHBOARD ---
     if role == "MANAGER":
-        # Get team members
+        # 1. TOP STATS CARDS
         team_members = Employee.query.filter_by(manager_id=user_id).all()
         team_ids = [m.id for m in team_members]
         
-        # Today's Team Attendance
-        att_counts = db.session.query(Attendance.status, func.count(Attendance.attendance_id))\
+        # Present Today
+        present_today = Attendance.query.filter(
+            Attendance.employee_id.in_(team_ids),
+            Attendance.attendance_date == today,
+            Attendance.status == 'Present'
+        ).count()
+        
+        # Pending Tasks
+        pending_tasks = Task.query.filter(
+            Task.assigned_to_employee_id.in_(team_ids),
+            Task.status == 'Pending'
+        ).count()
+        
+        # Clocked Hours (This Week)
+        start_week = today - timedelta(days=today.weekday())
+        week_minutes = db.session.query(func.sum(Attendance.total_minutes))\
+            .filter(Attendance.employee_id.in_(team_ids), Attendance.attendance_date >= start_week).scalar() or 0
+        clocked_hours = round(week_minutes / 60, 1)
+
+        # 2. TEAM ATTENDANCE TRENDS (Line Chart - Last 7 Days)
+        trends = []
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            day_label = d.strftime('%a')
+            p_count = Attendance.query.filter(Attendance.employee_id.in_(team_ids), Attendance.attendance_date == d, Attendance.status == 'Present').count()
+            a_count = Attendance.query.filter(Attendance.employee_id.in_(team_ids), Attendance.attendance_date == d, Attendance.status == 'Absent').count()
+            trends.append({"day": day_label, "present": p_count, "absent": a_count})
+
+        # 3. TODAY'S STATUS (Donut Chart)
+        today_att = db.session.query(Attendance.status, func.count(Attendance.attendance_id))\
             .filter(Attendance.employee_id.in_(team_ids), Attendance.attendance_date == today)\
             .group_by(Attendance.status).all()
         
-        att_dict = {status: count for status, count in att_counts}
+        todays_status = {status: count for status, count in today_att}
+        on_leave = LeaveRequest.query.filter(
+            LeaveRequest.employee_id.in_(team_ids),
+            LeaveRequest.status == 'Approved',
+            LeaveRequest.start_date <= today,
+            LeaveRequest.end_date >= today
+        ).count()
+
+        # 4. LISTS
+        # Pending Leave Requests (Team)
+        pending_leaves_list = []
+        recent_requests = LeaveRequest.query.filter(
+            LeaveRequest.employee_id.in_(team_ids),
+            LeaveRequest.status == 'Pending'
+        ).order_by(desc(LeaveRequest.created_at)).limit(5).all()
         
-        # Pending Approvals
-        pending_leaves = LeaveRequest.query.filter(LeaveRequest.employee_id.in_(team_ids), LeaveRequest.status == 'Pending').count()
+        for req in recent_requests:
+            emp_name = req.employee.full_name if req.employee else "Unknown"
+            pending_leaves_list.append({
+                "id": req.id,
+                "name": emp_name,
+                "type": req.leave_type or "Leave",
+                "days": f"({req.total_days} Days)" if req.total_days else "",
+                "date": f"{req.start_date.strftime('%b %d')}-{req.end_date.strftime('%d')}" if req.start_date and req.end_date else ""
+            })
+
+        # Upcoming Holidays
+        holidays_list = []
+        next_holidays = Holiday.query.filter(Holiday.date >= today).order_by(Holiday.date).limit(3).all()
+        for h in next_holidays:
+            holidays_list.append({
+                "date": h.date.strftime('%b %d'),
+                "day": h.date.strftime('%A'),
+                "name": h.name
+            })
 
         # FETCH PERSONAL DATA (for My Space)
-        emp = Employee.query.filter_by(user_id=user_id).first()
+        personal_emp = Employee.query.filter_by(user_id=user_id).first()
         personal_data = {}
-        if emp:
-            att = Attendance.query.filter_by(employee_id=emp.id, attendance_date=today).first()
+        if personal_emp:
+            att = Attendance.query.filter_by(employee_id=personal_emp.id, attendance_date=today).first()
             p_status = "Absent"
             p_in = "--:--"
             p_out = "--:--"
@@ -143,35 +202,19 @@ def _get_role_dashboard_stats():
                 m = total_mins % 60
                 p_hours = f"{h}h {m}m"
 
-            shift_assign = ShiftAssignment.query.filter_by(employee_id=emp.id).first()
-            shift_str = "No Shift Assigned"
-            if shift_assign and shift_assign.shift:
-                s = shift_assign.shift
-                shift_str = f"{s.start_time.strftime('%I:%M %p')} - {s.end_time.strftime('%I:%M %p')}"
-
-            balances = LeaveBalance.query.filter_by(employee_id=emp.id).all()
+            balances = LeaveBalance.query.filter_by(employee_id=personal_emp.id).all()
             total_balance = sum([(b.balance or 0.0) for b in balances])
-            p_pending_leaves = LeaveRequest.query.filter_by(employee_id=emp.id, status='Pending').count()
-            p_tasks = Task.query.filter_by(assigned_to_employee_id=emp.id, status='Pending').count()
-
-            next_holiday_obj = Holiday.query.filter(Holiday.date >= today).order_by(Holiday.date).first()
-            next_holiday_str = "No upcoming holidays"
-            if next_holiday_obj:
-                next_holiday_str = f"{next_holiday_obj.date.strftime('%b %d')} ({next_holiday_obj.name})"
-
+            
             personal_data = {
                 "at_a_glance": {
                     "status": p_status,
-                    "shift": shift_str,
                     "in_time": p_in,
                     "out_time": p_out,
                     "logged_hours": p_hours
                 },
                 "stats": {
                     "leave_balance": total_balance,
-                    "pending_leaves": p_pending_leaves,
-                    "action_required_tasks": p_tasks,
-                    "next_holiday": next_holiday_str
+                    "pending_leaves": LeaveRequest.query.filter_by(employee_id=personal_emp.id, status='Pending').count()
                 }
             }
 
@@ -179,18 +222,23 @@ def _get_role_dashboard_stats():
             "success": True,
             "role": "MANAGER",
             "data": {
-                "team_snapshot": {
-                    "total_members": len(team_members),
-                    "present": att_dict.get("Present", 0),
-                    "absent": att_dict.get("Absent", 0),
-                    "on_leave": att_dict.get("Leave", 0) + att_dict.get("Half Day", 0),
-                    "late": att_dict.get("Late", 0)
+                "top_stats": {
+                    "total_team": len(team_members),
+                    "present_today": present_today,
+                    "pending_tasks": pending_tasks,
+                    "avg_efficiency": "85%",
+                    "clocked_hours": f"{clocked_hours}h",
+                    "active_goals": 3
                 },
-                "pending_actions": {
-                    "approvals": pending_leaves,
-                    "attendance_corrections": 0
+                "attendance_trends": trends,
+                "todays_status": {
+                    "present": todays_status.get("Present", 0),
+                    "absent": todays_status.get("Absent", 0),
+                    "on_leave": on_leave,
+                    "wfh": todays_status.get("WFH", 0)
                 },
-                # Include personal data so My Space works
+                "pending_leaves": pending_leaves_list,
+                "upcoming_holidays": holidays_list,
                 **personal_data
             }
         })

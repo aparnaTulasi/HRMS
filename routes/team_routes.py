@@ -7,7 +7,7 @@ from models.squad_member import SquadMember
 from models.user import User
 from utils.decorators import token_required, role_required
 from datetime import date, datetime, timedelta
-from sqlalchemy import func
+from sqlalchemy import func, or_
 import random
 
 team_bp = Blueprint('team', __name__)
@@ -325,6 +325,132 @@ def get_employee_team_resilience():
             "metrics": {
                 "current": "94%",
                 "average": "82%",
+                "peak": "98%"
+            }
+        }
+    })
+@team_bp.route('/api/manager/team/dashboard', methods=['GET'])
+@token_required
+@role_required(['MANAGER'])
+def get_manager_team_dashboard():
+    """Stats for the Manager's squad(s)."""
+    emp = g.user.employee_profile
+    if not emp:
+        return jsonify({"success": False, "message": "Employee profile required"}), 400
+        
+    cid = g.user.company_id
+    
+    # 1. Identify Squad(s) managed by this user
+    # Managers are often identified either by being the Squad lead or by direct reports
+    managed_squads = SquadMember.query.filter(
+        SquadMember.employee_id == emp.id,
+        or_(SquadMember.role == 'Lead', SquadMember.role == 'Manager')
+    ).all()
+    
+    squad_ids = [s.squad_id for s in managed_squads]
+    
+    if squad_ids:
+        # Team is the Squad members
+        members = SquadMember.query.filter(SquadMember.squad_id.in_(squad_ids)).all()
+        member_ids = list(set([m.employee_id for m in members]))
+        total_members = len(member_ids)
+        
+        # Today's attendance
+        today = date.today()
+        attendance = Attendance.query.filter(
+            Attendance.employee_id.in_(member_ids),
+            Attendance.attendance_date == today
+        ).all()
+        
+        active_now = len([a for a in attendance if a.status in ['Present', 'WFH']])
+        
+        # Pending Onboarding/Leaves
+        pending = len([a for a in attendance if a.status == 'Leave'])
+        
+        # Admins (Leads/Managers in these squads)
+        admins_count = SquadMember.query.filter(
+            SquadMember.squad_id.in_(squad_ids),
+            or_(SquadMember.role == 'Lead', SquadMember.role == 'Manager', SquadMember.role == 'Admin')
+        ).count()
+    else:
+        # Fallback to direct reports if no squads managed
+        # Use existing logic from dashboard or simple check
+        from models.employee import Employee
+        reports = Employee.query.filter_by(manager_id=g.user.id).all()
+        total_members = len(reports)
+        active_now = 0 # Placeholder for direct reports attendance if not in squad
+        pending = 0
+        admins_count = 0
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_members": total_members,
+            "active_now": active_now,
+            "pending": pending,
+            "admins_count": admins_count,
+            "trends": {
+                "members": "+0 vs last month",
+                "active": "0% vs last month",
+                "pending": "0 vs last month",
+                "admins": "+0 vs last month"
+            }
+        }
+    })
+
+@team_bp.route('/api/manager/team/superstars', methods=['GET'])
+@token_required
+@role_required(['MANAGER'])
+def get_manager_team_superstars():
+    """Lists superstar members of the Manager's squad."""
+    emp = g.user.employee_profile
+    if not emp: return jsonify({"success": True, "data": []}), 200
+    
+    managed_squads = SquadMember.query.filter(
+        SquadMember.employee_id == emp.id,
+        or_(SquadMember.role == 'Lead', SquadMember.role == 'Manager')
+    ).all()
+    
+    squad_ids = [s.squad_id for s in managed_squads]
+    if not squad_ids:
+        # Fallback to direct reports
+        employees = Employee.query.filter_by(manager_id=g.user.id).all()
+    else:
+        members = SquadMember.query.filter(SquadMember.squad_id.in_(squad_ids)).all()
+        emp_ids = list(set([m.employee_id for m in members]))
+        employees = Employee.query.filter(Employee.id.in_(emp_ids)).all()
+
+    superstars = []
+    for e in employees:
+        user = User.query.get(e.user_id)
+        # Mocking performance based on attendance consistency for a more real feel
+        performance = random.randint(88, 99) if e.status == 'ACTIVE' else random.randint(70, 85)
+        
+        superstars.append({
+            "id": e.id,
+            "name": e.full_name,
+            "role": e.designation or "Team Member",
+            "image": user.profile_pic if user and hasattr(user, 'profile_pic') else None,
+            "performance": performance,
+            "status": "online" if e.status == 'ACTIVE' else "offline"
+        })
+        
+    return jsonify({"success": True, "data": superstars})
+
+@team_bp.route('/api/manager/team/resilience', methods=['GET'])
+@token_required
+@role_required(['MANAGER'])
+def get_manager_team_resilience():
+    """Monthly consistency/resilience data for the team."""
+    # Data following the dashboard resilience format
+    return jsonify({
+        "success": True,
+        "data": {
+            "consistency_score": [82, 85, 87, 84, 89, 93, 91, 95, 92, 94],
+            "labels": ["Day 1", "Day 5", "Day 10", "Day 15", "Day 20", "Day 25", "Day 26", "Day 27", "Day 28", "Today"],
+            "metrics": {
+                "current": "94%",
+                "average": "88%",
                 "peak": "98%"
             }
         }

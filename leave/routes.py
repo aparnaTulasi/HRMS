@@ -8,10 +8,12 @@ from .audit_logger import log_action
 from models import db
 from models.employee import Employee
 from models.user import User
+from models.attendance import Attendance
 from models.audit_log import AuditLog
 from utils.decorators import token_required, role_required, permission_required
 from constants.permissions_registry import Permissions
 from utils.date_utils import parse_date
+from utils.authority_utils import is_authorized_delegate
 from sqlalchemy import func, case
 
 # _parse_date removed to use central parse_date
@@ -1379,6 +1381,267 @@ def manage_leave_request(id):
         
         return jsonify({'message': 'Leave request updated successfully'}), 200
 
+@leave_bp.route('/dashboard-stats', methods=['GET'])
+@token_required
+def get_leave_dashboard_stats():
+    """
+    Returns counts of Pending, Approved, and Rejected leave requests,
+    plus monthly trends and distribution by type.
+    """
+    base_query = LeaveRequest.query
+    
+    if g.user.role == 'MANAGER':
+        base_query = base_query.join(Employee, LeaveRequest.employee_id == Employee.id)\
+                               .filter(Employee.manager_id == g.user.id)
+    elif g.user.role == 'SUPER_ADMIN' and request.args.get('company_id'):
+        base_query = base_query.filter_by(company_id=request.args.get('company_id'))
+    elif g.user.role != 'SUPER_ADMIN':
+        base_query = base_query.filter_by(company_id=g.user.company_id)
+
+    # Basic Counts
+    counts = {
+        'total': base_query.count(),
+        'pending': base_query.filter(LeaveRequest.status == 'Pending').count(),
+        'approved': base_query.filter(LeaveRequest.status == 'Approved').count(),
+        'rejected': base_query.filter(LeaveRequest.status == 'Rejected').count()
+    }
+
+    # Monthly Trend (Approved leaves in current year)
+    current_year = datetime.utcnow().year
+    trend_data = db.session.query(
+        func.extract('month', LeaveRequest.from_date).label('month'),
+        func.count(LeaveRequest.id).label('count')
+    ).filter(
+        LeaveRequest.status == 'Approved',
+        func.extract('year', LeaveRequest.from_date) == current_year
+    )
+    
+    # Apply role scoping to trend
+    if g.user.role == 'MANAGER':
+        trend_data = trend_data.join(Employee, LeaveRequest.employee_id == Employee.id)\
+                               .filter(Employee.manager_id == g.user.id)
+    elif g.user.role != 'SUPER_ADMIN':
+        trend_data = trend_data.filter(LeaveRequest.company_id == g.user.company_id)
+        
+    trend_results = trend_data.group_by('month').all()
+    monthly_trend = [0] * 12
+    for month, count in trend_results:
+        monthly_trend[int(month)-1] = count
+
+    # Distribution (Used leaves by type)
+    dist_data = db.session.query(
+        LeaveType.name,
+        func.count(LeaveRequest.id)
+    ).join(LeaveRequest, LeaveRequest.leave_type_id == LeaveType.id)\
+     .filter(LeaveRequest.status == 'Approved')
+
+    # Apply role scoping to distribution
+    if g.user.role == 'MANAGER':
+        dist_data = dist_data.join(Employee, LeaveRequest.employee_id == Employee.id)\
+                             .filter(Employee.manager_id == g.user.id)
+    elif g.user.role != 'SUPER_ADMIN':
+        dist_data = dist_data.filter(LeaveRequest.company_id == g.user.company_id)
+
+    dist_results = dist_data.group_by(LeaveType.name).all()
+    distribution = {name: count for name, count in dist_results}
+
+    return jsonify({
+        "success": True,
+        "data": {
+            'badges': {'approved': counts['approved'], 'pending': counts['pending']},
+            'cards': counts,
+            'monthly_trend': monthly_trend,
+            'distribution': distribution
+        }
+    }), 200
+
+@leave_bp.route('/control/recent-requests', methods=['GET'])
+@token_required
+@permission_required(Permissions.LEAVE_APPROVE)
+def get_control_recent_requests():
+    """Fetches the latest 5-10 leave requests for the Overview table."""
+    query = LeaveRequest.query
+    if g.user.role == 'MANAGER':
+        query = query.join(Employee, LeaveRequest.employee_id == Employee.id)\
+                     .filter(Employee.manager_id == g.user.id)
+    elif g.user.role != 'SUPER_ADMIN':
+        query = query.filter_by(company_id=g.user.company_id)
+        
+    recent = query.order_by(LeaveRequest.created_at.desc()).limit(10).all()
+    
+    results = []
+    for r in recent:
+        data = serialize(r)
+        data['employee_name'] = r.employee.full_name if r.employee else "Unknown"
+        data['leave_type_name'] = r.leave_type.name if hasattr(r, 'leave_type') else "Unknown"
+        data['period'] = f"{r.from_date} to {r.to_date}"
+        data['days'] = (r.to_date - r.from_date).days + 1
+        results.append(data)
+        
+    return jsonify({
+        "success": True,
+        "data": results
+    }), 200
+
+@leave_bp.route('/control/bulk-action', methods=['POST'])
+@token_required
+@permission_required(Permissions.LEAVE_APPROVE)
+def bulk_approval_action():
+    """Mass Approve or Reject leave requests."""
+    data = request.get_json() or {}
+    ids = data.get('ids', [])
+    new_status = data.get('status', 'Approved') # Approved or Rejected
+    
+    if not ids:
+        return jsonify({'message': 'No IDs provided'}), 400
+        
+    updated = 0
+    errors = []
+    
+    for rid in ids:
+        leave = LeaveRequest.query.get(rid)
+        if not leave: continue
+        
+        # Security check
+        if g.user.role == 'MANAGER':
+            emp = Employee.query.get(leave.employee_id)
+            # Normal Manager check OR Delegation check
+            is_auth = (emp and emp.manager_id == g.user.id) or \
+                      (emp and is_authorized_delegate(emp.manager_id, g.user.id, 'Leave Approval'))
+            
+            if not is_auth:
+                errors.append(f"Request {rid}: Unauthorized")
+                continue
+        elif g.user.role != 'SUPER_ADMIN' and leave.company_id != g.user.company_id:
+            errors.append(f"Request {rid}: Unauthorized")
+            continue
+            
+        if new_status == 'Approved' and leave.status != 'Approved':
+            success, err = _process_leave_balance_deduction(leave)
+            if not success:
+                errors.append(f"Request {rid}: {err}")
+                continue
+            _sync_leave_to_attendance(leave)
+            
+        leave.status = new_status
+        updated += 1
+        
+    db.session.commit()
+    return jsonify({
+        'message': f'Processed {updated} requests',
+        'errors': errors
+    }), 200
+
+@leave_bp.route('/control/policies', methods=['GET', 'POST'])
+@token_required
+@permission_required(Permissions.LEAVE_APPROVE)
+def manage_leave_policies():
+    """List or Create leave policies."""
+    if request.method == 'GET':
+        policies = LeavePolicy.query.filter_by(company_id=g.user.company_id).all()
+        return jsonify([serialize(p) for p in policies]), 200
+        
+    # POST - Create Policy
+    data = request.get_json() or {}
+    name = data.get('name')
+    days_per_year = data.get('days_per_year', 12)
+    allow_carry_forward = data.get('allow_carry_forward', False)
+    
+    if not name:
+        return jsonify({'message': 'Policy name is required'}), 400
+        
+    policy = LeavePolicy(
+        company_id=g.user.company_id,
+        name=name,
+        config_json=json.dumps({
+            'description': data.get('description', ''),
+            'allow_carry_forward': allow_carry_forward
+        })
+    )
+    db.session.add(policy)
+    db.session.commit()
+    
+    # Also create a default mapping if leave_type_id is provided
+    # (Usually UI would have a dropdown for Leave Type)
+    return jsonify({'message': 'Policy created successfully', 'id': policy.id}), 201
+
+@leave_bp.route('/control/history', methods=['GET'])
+@token_required
+@permission_required(Permissions.LEAVE_APPROVE)
+def get_leave_history_log():
+    """Advanced search and filter for the History Log tab."""
+    status_filter = request.args.get('status')
+    type_filter = request.args.get('type')
+    search_query = request.args.get('search', '')
+
+    query = db.session.query(LeaveRequest).join(Employee).join(LeaveType)
+    
+    # Role Scoping
+    if g.user.role == 'MANAGER':
+        query = query.filter(Employee.manager_id == g.user.id)
+    elif g.user.role != 'SUPER_ADMIN':
+        query = query.filter(LeaveRequest.company_id == g.user.company_id)
+
+    # Filters
+    if status_filter and status_filter.upper() != 'ALL':
+        query = query.filter(LeaveRequest.status == status_filter)
+    if type_filter and type_filter.upper() != 'ALL':
+        query = query.filter(LeaveType.name == type_filter)
+    if search_query:
+        query = query.filter(Employee.full_name.ilike(f"%{search_query}%"))
+
+    history = query.order_by(LeaveRequest.created_at.desc()).all()
+    
+    results = []
+    for r in history:
+        data = serialize(r)
+        data['employee_name'] = r.employee.full_name
+        data['leave_type_name'] = r.leave_type.name
+        data['days'] = (r.to_date - r.from_date).days + 1
+        results.append(data)
+        
+    return jsonify(results), 200
+
+@leave_bp.route('/control/history/export', methods=['GET'])
+@token_required
+@permission_required(Permissions.LEAVE_APPROVE)
+def export_leave_history():
+    """Generates a CSV export of the Leave History Log."""
+    import csv
+    from io import StringIO
+    from flask import Response
+
+    # Reuse history query logic (simplified for brevity)
+    query = db.session.query(LeaveRequest).join(Employee)
+    if g.user.role == 'MANAGER':
+        query = query.filter(Employee.manager_id == g.user.id)
+    elif g.user.role != 'SUPER_ADMIN':
+        query = query.filter(LeaveRequest.company_id == g.user.company_id)
+
+    records = query.all()
+    
+    si = StringIO()
+    cw = csv.writer(si)
+    cw.writerow(['Employee', 'Leave Type', 'From', 'To', 'Days', 'Status', 'Applied At'])
+    
+    for r in records:
+        cw.writerow([
+            r.employee.full_name,
+            r.leave_type.name,
+            r.from_date,
+            r.to_date,
+            (r.to_date - r.from_date).days + 1,
+            r.status,
+            r.created_at.strftime('%Y-%m-%d %H:%M')
+        ])
+    
+    output = si.getvalue()
+    return Response(
+        output,
+        mimetype="text/csv",
+        headers={"Content-disposition": "attachment; filename=leave_history.csv"}
+    )
+
 @leave_bp.route('/pending-approvals', methods=['GET'])
 @token_required
 @permission_required(Permissions.LEAVE_APPROVE)
@@ -1388,13 +1651,36 @@ def get_pending_approvals():
         query = LeaveRequest.query.filter_by(company_id=request.args.get('company_id'), status='Pending')
     elif g.user.role == 'SUPER_ADMIN':
         query = LeaveRequest.query.filter_by(status='Pending')
+    elif g.user.role == 'MANAGER':
+        # 1. Manager's own subordinates
+        # 2. Subordinates of anyone who has delegated Leave Approval to this manager
+        
+        # Get list of managers who delegated to me
+        # For simplicity in this logic, we'll just join with delegation check if possible OR fetch delegators
+        from models.delegation import Delegation
+        today = datetime.utcnow().date()
+        delegators = db.session.query(Delegation.delegated_by_id).filter(
+            Delegation.delegated_to_id == g.user.id,
+            Delegation.status == 'ACTIVE',
+            Delegation.start_date <= today,
+            Delegation.end_date >= today,
+            (Delegation.module == 'Leave Approval') | (Delegation.module == 'All')
+        ).all()
+        delegator_ids = [d[0] for d in delegators]
+        
+        manager_ids = [g.user.id] + delegator_ids
+        
+        query = LeaveRequest.query.join(Employee, LeaveRequest.employee_id == Employee.id)\
+            .filter(Employee.manager_id.in_(manager_ids), LeaveRequest.status == 'Pending')
     else:
+        # HR/Admin see everything in their company
         query = LeaveRequest.query.filter_by(
             company_id=g.user.company_id,
             status='Pending'
         )
 
     # Join with LeaveType and Employee to get the names for display
+    # (Note: For Manager, the join is already done, so we add columns)
     leaves_with_data = query.join(LeaveType, LeaveRequest.leave_type_id == LeaveType.id)\
         .join(Employee, LeaveRequest.employee_id == Employee.id)\
         .add_columns(
@@ -1421,7 +1707,13 @@ def get_pending_approvals():
 @permission_required(Permissions.LEAVE_APPROVE)
 def approve_leave(id):
     leave = LeaveRequest.query.get_or_404(id)
-    if g.user.role != 'SUPER_ADMIN' and leave.company_id != g.user.company_id:
+    
+    # Manager check: Must be their subordinate
+    if g.user.role == 'MANAGER':
+        emp = Employee.query.get(leave.employee_id)
+        if not emp or emp.manager_id != g.user.id:
+            return jsonify({'message': 'Unauthorized: This employee is not in your team'}), 403
+    elif g.user.role != 'SUPER_ADMIN' and leave.company_id != g.user.company_id:
         return jsonify({'message': 'Unauthorized'}), 403
     
     approver_emp = Employee.query.filter_by(user_id=g.user.id).first()
@@ -1439,7 +1731,56 @@ def approve_leave(id):
     db.session.commit()
     
     log_action(f"LEAVE_APPROVE", "leave_request", leave.id, 200, meta=json.dumps(data))
+    
+    # Sync to Attendance if approved
+    if new_status == 'Approved':
+        _sync_leave_to_attendance(leave)
+        
     return jsonify({'message': f'Leave {leave.status.lower()}'})
+
+def _sync_leave_to_attendance(leave):
+    """
+    Synchronizes an approved leave request to the Attendance module.
+    Marks all dates in the range as 'Leave'.
+    """
+    from datetime import timedelta
+    current_date = leave.from_date
+    while current_date <= leave.to_date:
+        # Check for existing record
+        att = Attendance.query.filter_by(
+            company_id=leave.company_id,
+            employee_id=leave.employee_id,
+            attendance_date=current_date
+        ).first()
+
+        if att:
+            # Update existing
+            att.status = "Leave"
+            att.punch_in_time = None
+            att.punch_out_time = None
+            att.remarks = f"Approved Leave: {leave.id}"
+            att.updated_by = g.user.id
+        else:
+            # Create new
+            new_att = Attendance(
+                company_id=leave.company_id,
+                employee_id=leave.employee_id,
+                attendance_date=current_date,
+                status="Leave",
+                remarks=f"Approved Leave: {leave.id}",
+                created_by=g.user.id,
+                year=current_date.year,
+                month=current_date.month
+            )
+            db.session.add(new_att)
+        
+        current_date += timedelta(days=1)
+    
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error syncing leave to attendance: {e}")
 
 def _process_leave_balance_deduction(leave):
     """Internal helper to deduct balance and add ledger entry upon approval."""

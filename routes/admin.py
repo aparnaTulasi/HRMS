@@ -111,6 +111,10 @@ def deactivate_employee(emp_id):
         if not emp:
             return jsonify({'success': False, 'message': 'Employee not found or unauthorized'}), 404
 
+        # Manager is Read-Only
+        if g.user.role == 'MANAGER':
+            return jsonify({'success': False, 'message': 'Forbidden: Managers have read-only access to the directory'}), 403
+
         emp_name = emp.full_name
         user_id = emp.user_id
 
@@ -148,6 +152,10 @@ def update_employee(emp_id):
     if not emp:
         return jsonify({'message': 'Employee not found'}), 404
         
+    # Manager is Read-Only
+    if g.user.role == 'MANAGER':
+        return jsonify({'success': False, 'message': 'Forbidden: Managers have read-only access to the directory'}), 403
+
     data = request.get_json(force=True) or {}
     
     # Update user account details if provided
@@ -313,6 +321,10 @@ def create_employee():
         }), 500
 
 def _create_employee_impl():
+    # Manager is Read-Only
+    if g.user.role == 'MANAGER':
+        return jsonify({'success': False, 'message': 'Forbidden: Managers cannot create employees'}), 403
+
     data = request.get_json(force=True) or {}
     if not data:
         return jsonify({'message': 'No input data provided'}), 400

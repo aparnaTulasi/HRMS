@@ -8,6 +8,7 @@ from utils.decorators import token_required, permission_required
 from constants.permissions_registry import Permissions
 from sqlalchemy import desc, func, and_
 from utils.date_utils import parse_date
+from utils.notification_utils import create_notification
 
 desk_bp = Blueprint('desk', __name__)
 
@@ -199,6 +200,13 @@ def book_desk():
     )
     
     db.session.add(new_booking)
+    
+    # Notify the user
+    create_notification(
+        user_id=g.user.id,
+        message=f"Desk {desk.desk_code} booked successfully for {booking_date_str}."
+    )
+
     db.session.commit()
     
     return jsonify({"success": True, "message": "Desk booked successfully", "booking_id": new_booking.id}), 201

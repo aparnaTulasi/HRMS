@@ -29,6 +29,18 @@ def get_tickets():
             tickets = SupportTicket.query.order_by(SupportTicket.created_at.desc()).all()
         elif g.user.role in ['ADMIN', 'HR']:
             tickets = SupportTicket.query.filter_by(company_id=g.user.company_id).order_by(SupportTicket.created_at.desc()).all()
+        elif g.user.role == 'MANAGER':
+            # Manager sees their own AND their subordinates' tickets
+            from models.employee import Employee
+            from models.user import User
+            
+            manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
+            if manager_emp:
+                subordinate_user_ids = [e.user_id for e in Employee.query.filter_by(manager_id=manager_emp.id).all()]
+                allowed_user_ids = subordinate_user_ids + [g.user.id]
+                tickets = SupportTicket.query.filter(SupportTicket.created_by.in_(allowed_user_ids), SupportTicket.company_id == g.user.company_id).order_by(SupportTicket.created_at.desc()).all()
+            else:
+                tickets = SupportTicket.query.filter_by(created_by=g.user.id, company_id=g.user.company_id).order_by(SupportTicket.created_at.desc()).all()
         else:
             # Employee sees only their own
             tickets = SupportTicket.query.filter_by(created_by=g.user.id, company_id=g.user.company_id).order_by(SupportTicket.created_at.desc()).all()
@@ -46,8 +58,17 @@ def get_dashboard_stats():
     try:
         q = SupportTicket.query.filter_by(company_id=g.user.company_id)
         
-        # If standard employee, show their own stats
-        if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
+        # If standard employee, show their own stats. If manager, show team stats.
+        if g.user.role == 'MANAGER':
+            from models.employee import Employee
+            manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
+            if manager_emp:
+                subordinate_user_ids = [e.user_id for e in Employee.query.filter_by(manager_id=manager_emp.id).all()]
+                allowed_user_ids = subordinate_user_ids + [g.user.id]
+                q = q.filter(SupportTicket.created_by.in_(allowed_user_ids))
+            else:
+                q = q.filter_by(created_by=g.user.id)
+        elif g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN']:
             q = q.filter_by(created_by=g.user.id)
             
         tickets = q.all()

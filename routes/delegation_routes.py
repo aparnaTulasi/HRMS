@@ -13,7 +13,6 @@ delegation_bp = Blueprint('delegation', __name__)
 
 @delegation_bp.route('/stats', methods=['GET'])
 @token_required
-@permission_required(Permissions.DELEGATION_VIEW)
 def get_delegation_stats():
     """
     Summary counts for delegation dashboard cards.
@@ -26,23 +25,34 @@ def get_delegation_stats():
         
     today = date.today()
     
-    # Active: Status is ACTIVE AND Today is within start and end date
-    active_count = Delegation.query.filter(
+    # Role Scoping
+    is_admin = g.user.role in ['ADMIN', 'SUPER_ADMIN', 'HR']
+    
+    # Active
+    active_q = Delegation.query.filter(
         Delegation.company_id == cid,
         Delegation.status == 'ACTIVE',
-        Delegation.delegated_by_id == emp_id,
         Delegation.start_date <= today,
         Delegation.end_date >= today
-    ).count()
+    )
     
-    # Expired: Status is ACTIVE but end_date < today (Auto-expiry check)
-    expired_count = Delegation.query.filter(
+    # Expired
+    expired_q = Delegation.query.filter(
         Delegation.company_id == cid,
-        Delegation.delegated_by_id == emp_id,
         or_(Delegation.status == 'EXPIRED', Delegation.end_date < today)
-    ).count()
+    )
     
-    total_logs = Delegation.query.filter_by(company_id=cid, delegated_by_id=emp_id).count()
+    # Total
+    total_q = Delegation.query.filter_by(company_id=cid)
+    
+    if not is_admin:
+        active_q = active_q.filter(Delegation.delegated_by_id == emp_id)
+        expired_q = expired_q.filter(Delegation.delegated_by_id == emp_id)
+        total_q = total_q.filter(Delegation.delegated_by_id == emp_id)
+        
+    active_count = active_q.count()
+    expired_count = expired_q.count()
+    total_logs = total_q.count()
     
     return jsonify({
         "success": True,
@@ -55,7 +65,6 @@ def get_delegation_stats():
 
 @delegation_bp.route('/list', methods=['GET'])
 @token_required
-@permission_required(Permissions.DELEGATION_VIEW)
 def list_delegations():
     """
     Fetches history of delegations.
@@ -67,11 +76,13 @@ def list_delegations():
         
     search = request.args.get('search', '').strip().lower()
     
-    # Show delegations delegated BY me OR TO me
-    q = Delegation.query.filter(
-        Delegation.company_id == cid,
-        or_(Delegation.delegated_by_id == emp_id, Delegation.delegated_to_id == emp_id)
-    )
+    # Role Scoping
+    is_admin = g.user.role in ['ADMIN', 'SUPER_ADMIN', 'HR']
+    
+    q = Delegation.query.filter(Delegation.company_id == cid)
+    if not is_admin:
+        # Managers/Employees see delegations delegated BY them OR TO them
+        q = q.filter(or_(Delegation.delegated_by_id == emp_id, Delegation.delegated_to_id == emp_id))
     
     if search:
         # Search by notes or module or names
@@ -106,7 +117,6 @@ def list_delegations():
 
 @delegation_bp.route('/create', methods=['POST'])
 @token_required
-@permission_required(Permissions.DELEGATION_CREATE)
 def create_delegation():
     """
     Creates a new delegation.
@@ -151,7 +161,6 @@ def create_delegation():
 
 @delegation_bp.route('/cancel/<int:id>', methods=['POST'])
 @token_required
-@permission_required(Permissions.DELEGATION_CANCEL)
 def cancel_delegation(id):
     """
     Cancels an active delegation.

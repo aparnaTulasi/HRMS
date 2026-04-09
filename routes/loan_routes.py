@@ -12,10 +12,12 @@ import calendar
 loan_bp = Blueprint('loan', __name__)
 
 def has_loan_management_permission():
-    """Helper to check if user can see ALL loans."""
-    # This is a bit of a workaround since permission_required is a decorator
-    # We can check g.user.permissions if it's loaded, or just check role
+    """Helper to check if user can see ALL loans (Company level)."""
     return g.user.role in ['ADMIN', 'SUPER_ADMIN', 'HR']
+
+def is_team_manager():
+    """Helper to check if user is a Manager."""
+    return g.user.role == 'MANAGER'
 
 @loan_bp.route('/dashboard', methods=['GET'])
 @token_required
@@ -29,43 +31,56 @@ def get_loan_dashboard():
     
     # Context Selection
     is_admin = has_loan_management_permission()
+    is_manager = is_team_manager()
     emp_id = g.user.employee_profile.id if g.user.employee_profile else None
     
     # Filter Base
     base_q = Loan.query.filter(Loan.company_id == company_id)
-    if not is_admin:
+    if is_manager:
+        base_q = base_q.join(Employee, Loan.employee_id == Employee.id)\
+                       .filter(Employee.manager_id == g.user.id)
+    elif not is_admin:
         if not emp_id:
             return jsonify({"success": False, "message": "Employee profile required"}), 400
         base_q = base_q.filter(Loan.employee_id == emp_id)
 
     # 1. Total Disbursed
-    total_disbursed = db.session.query(func.sum(Loan.amount)).filter(
+    total_disbursed_q = db.session.query(func.sum(Loan.amount)).filter(
         Loan.company_id == company_id,
         Loan.status.in_(['APPROVED', 'ACTIVE', 'PAID'])
     )
-    if not is_admin:
-        total_disbursed = total_disbursed.filter(Loan.employee_id == emp_id)
-    total_disbursed = total_disbursed.scalar() or 0.0
+    if is_manager:
+        total_disbursed_q = total_disbursed_q.join(Employee, Loan.employee_id == Employee.id)\
+                                             .filter(Employee.manager_id == g.user.id)
+    elif not is_admin:
+        total_disbursed_q = total_disbursed_q.filter(Loan.employee_id == emp_id)
+    total_disbursed = total_disbursed_q.scalar() or 0.0
 
     # 2. Active Loans
     active_loans_count = base_q.filter(Loan.status == 'ACTIVE').count()
 
     # 3. Avg. Interest Rate
-    avg_interest = db.session.query(func.avg(Loan.interest_rate)).filter(
+    avg_interest_q = db.session.query(func.avg(Loan.interest_rate)).filter(
         Loan.company_id == company_id,
         Loan.status == 'ACTIVE'
     )
-    if not is_admin:
-        avg_interest = avg_interest.filter(Loan.employee_id == emp_id)
-    avg_interest = avg_interest.scalar() or 0.0
+    if is_manager:
+        avg_interest_q = avg_interest_q.join(Employee, Loan.employee_id == Employee.id)\
+                                       .filter(Employee.manager_id == g.user.id)
+    elif not is_admin:
+        avg_interest_q = avg_interest_q.filter(Loan.employee_id == emp_id)
+    avg_interest = avg_interest_q.scalar() or 0.0
 
     # 4. Loan Type Distribution
-    type_dist = db.session.query(Loan.loan_type, func.count(Loan.id)).filter(
+    type_dist_q = db.session.query(Loan.loan_type, func.count(Loan.id)).filter(
         Loan.company_id == company_id
     )
-    if not is_admin:
-        type_dist = type_dist.filter(Loan.employee_id == emp_id)
-    type_dist = type_dist.group_by(Loan.loan_type).all()
+    if is_manager:
+        type_dist_q = type_dist_q.join(Employee, Loan.employee_id == Employee.id)\
+                                 .filter(Employee.manager_id == g.user.id)
+    elif not is_admin:
+        type_dist_q = type_dist_q.filter(Loan.employee_id == emp_id)
+    type_dist = type_dist_q.group_by(Loan.loan_type).all()
     
     type_distribution = [{"type": t[0], "total": t[1]} for t in type_dist]
 
@@ -87,7 +102,10 @@ def get_loan_dashboard():
              Loan.disbursement_date < end_of_month.date(),
              Loan.status.in_(['APPROVED', 'ACTIVE', 'PAID'])
         )
-        if not is_admin:
+        if is_manager:
+            monthly_sum_q = monthly_sum_q.join(Employee, Loan.employee_id == Employee.id)\
+                                         .filter(Employee.manager_id == g.user.id)
+        elif not is_admin:
             monthly_sum_q = monthly_sum_q.filter(Loan.employee_id == emp_id)
             
         monthly_sum = monthly_sum_q.scalar() or 0.0
@@ -119,9 +137,13 @@ def get_loan_requests():
         company_id = request.args.get('company_id', 1, type=int)
 
     is_admin = has_loan_management_permission()
+    is_manager = is_team_manager()
     
     q = Loan.query.filter_by(company_id=company_id)
-    if not is_admin:
+    if is_manager:
+        q = q.join(Employee, Loan.employee_id == Employee.id)\
+             .filter(Employee.manager_id == g.user.id)
+    elif not is_admin:
         emp_id = g.user.employee_profile.id if g.user.employee_profile else None
         if not emp_id: return jsonify({"success": True, "data": []}), 200
         q = q.filter_by(employee_id=emp_id)
@@ -140,9 +162,20 @@ def apply_loan():
     Employee applying for a loan.
     """
     data = request.get_json()
-    emp_id = g.user.employee_profile.id if g.user.employee_profile else None
-    if not emp_id:
-        return jsonify({"success": False, "message": "Employee profile required to apply for a loan"}), 400
+    
+    is_management = has_loan_management_permission() or is_team_manager()
+    target_emp_id = data.get('employee_id')
+    
+    if is_management and target_emp_id:
+        emp = Employee.query.get_or_404(target_emp_id)
+        # Manager security check
+        if is_team_manager() and emp.manager_id != g.user.id:
+            return jsonify({"success": False, "message": "Manager can only apply for their own team members"}), 403
+        emp_id = emp.id
+    else:
+        emp_id = g.user.employee_profile.id if g.user.employee_profile else None
+        if not emp_id:
+            return jsonify({"success": False, "message": "Employee profile required to apply for a loan"}), 400
         
     # Calculate EMI
     amount = float(data.get('amount', 0))
@@ -180,14 +213,25 @@ def apply_loan():
 
 @loan_bp.route('/<int:loan_id>/action', methods=['PATCH'])
 @token_required
-@permission_required(Permissions.LOAN_MANAGEMENT)
 def loan_action(loan_id):
     """
-    Admin Approve/Reject action.
+    Admin/Manager Approve/Reject action.
     """
+    is_admin = has_loan_management_permission()
+    is_manager = is_team_manager()
+    
+    if not is_admin and not is_manager:
+        return jsonify({"success": False, "message": "Permission denied"}), 403
+        
     loan = Loan.query.get(loan_id)
-    if not loan or loan.company_id != g.user.company_id:
+    if not loan or (loan.company_id != g.user.company_id and g.user.role != 'SUPER_ADMIN'):
         return jsonify({"success": False, "message": "Loan not found"}), 404
+
+    # Manager security check
+    if is_manager:
+        emp = Employee.query.get(loan.employee_id)
+        if not emp or emp.manager_id != g.user.id:
+            return jsonify({"success": False, "message": "Manager can only act on team members' loans"}), 403
 
     data = request.get_json()
     action = data.get('action') # APPROVE or REJECT

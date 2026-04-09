@@ -9,6 +9,7 @@ from utils.decorators import token_required, permission_required
 from constants.permissions_registry import Permissions
 from sqlalchemy import desc, func, or_
 from utils.date_utils import parse_date
+from utils.notification_utils import create_notification
 
 visitor_bp = Blueprint('visitor', __name__)
 
@@ -51,6 +52,15 @@ def create_visitor_request():
     )
     
     db.session.add(new_request)
+    
+    # Notify the host employee
+    host_user = User.query.join(Employee, Employee.user_id == User.id).filter(Employee.id == new_request.meeting_with_employee_id).first()
+    if host_user:
+        create_notification(
+            user_id=host_user.id,
+            message=f"New visitor request from {new_request.visitor_name} of {new_request.organization or 'Self'}."
+        )
+
     db.session.commit()
     
     return jsonify({
@@ -126,6 +136,14 @@ def visitor_action(request_id):
     data = request.get_json()
     action = data.get('action') # APPROVE, REJECT, CHECK_IN, CHECK_OUT
     
+    # Secure action with specific permissions
+    if action in ['APPROVE', 'REJECT']:
+        if not g.user.has_permission(Permissions.VISITOR_APPROVE):
+            return jsonify({"success": False, "message": "Insufficient permissions: Missing 'VISITOR_APPROVE'"}), 403
+    elif action in ['CHECK_IN', 'CHECK_OUT']:
+        if not g.user.has_permission(Permissions.VISITOR_LOG_MANAGE):
+            return jsonify({"success": False, "message": "Insufficient permissions: Missing 'VISITOR_LOG_MANAGE'"}), 403
+    
     v_req = VisitorRequest.query.filter_by(id=request_id, company_id=g.user.company_id).first()
     if not v_req:
         return jsonify({"success": False, "message": "Request not found"}), 404
@@ -134,13 +152,30 @@ def visitor_action(request_id):
         v_req.status = 'APPROVED'
         v_req.action_by = g.user.id
         v_req.action_at = datetime.utcnow()
+        # Notify the creator
+        create_notification(
+            user_id=v_req.created_by,
+            message=f"Your visitor request for {v_req.visitor_name} has been APPROVED."
+        )
     elif action == 'REJECT':
         v_req.status = 'REJECTED'
         v_req.action_by = g.user.id
         v_req.action_at = datetime.utcnow()
+        # Notify the creator
+        create_notification(
+            user_id=v_req.created_by,
+            message=f"Your visitor request for {v_req.visitor_name} was REJECTED."
+        )
     elif action == 'CHECK_IN':
         v_req.status = 'CHECKED_IN'
         v_req.check_in_time = datetime.now()
+        # Notify the host
+        host_user = User.query.join(Employee, Employee.user_id == User.id).filter(Employee.id == v_req.meeting_with_employee_id).first()
+        if host_user:
+            create_notification(
+                user_id=host_user.id,
+                message=f"Your visitor {v_req.visitor_name} has checked in and is waiting for you."
+            )
     elif action == 'CHECK_OUT':
         v_req.status = 'CHECKED_OUT'
         v_req.check_out_time = datetime.now()
@@ -152,6 +187,7 @@ def visitor_action(request_id):
 
 @visitor_bp.route('/stats', methods=['GET'])
 @token_required
+@permission_required(Permissions.VISITOR_VIEW)
 def get_visitor_stats():
     """
     Daily summary for visitor dashboard.
@@ -190,6 +226,7 @@ def get_visitor_stats():
 
 @visitor_bp.route('/staff-list', methods=['GET'])
 @token_required
+@permission_required(Permissions.VISITOR_CREATE)
 def get_staff_list():
     """
     Dropdown for host selection.
@@ -200,6 +237,7 @@ def get_staff_list():
 
 @visitor_bp.route('/print/<int:request_id>', methods=['GET'])
 @token_required
+@permission_required(Permissions.VISITOR_VIEW)
 def get_print_pass(request_id):
     """
     Exports visitor pass data for printing and downloading.
