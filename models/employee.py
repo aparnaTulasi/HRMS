@@ -41,3 +41,5 @@ class Employee(db.Model):
     documents = db.relationship('EmployeeDocument', backref='employee', lazy=True)
     attendance_records = db.relationship('Attendance', backref='employee', lazy=True)
     manager = db.relationship('Employee', remote_side=[id], backref='subordinates')
+    education = db.relationship('EmployeeEducation', backref='employee', lazy=True)
+    work_experience = db.relationship('EmployeeWorkExperience', backref='employee', lazy=True)

@@ -31,17 +31,20 @@ def get_employees():
     include_inactive = request.args.get('include_inactive', 'false').lower() == 'true'
     
     if g.user.role == 'SUPER_ADMIN':
+        print(f"[DEBUG] Super Admin listing ALL employees")
         query = Employee.query
     elif g.user.role == 'EMPLOYEE':
         # Employee can only see their own record (regardless of status for now)
         query = Employee.query.filter_by(user_id=g.user.id)
     else:
+        print(f"[DEBUG] {g.user.role} listing employees for CoID: {g.user.company_id}")
         query = Employee.query.filter_by(company_id=g.user.company_id)
 
     if not include_inactive and g.user.role != 'EMPLOYEE':
         query = query.filter(Employee.is_active == True)
         
     employees = query.all()
+    print(f"[DEBUG] Found {len(employees)} employees for role {g.user.role}")
 
     result = []
     for emp in employees:

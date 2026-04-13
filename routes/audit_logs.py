@@ -2,169 +2,109 @@ from flask import Blueprint, request, jsonify, g
 from utils.decorators import token_required
 from models.audit_log import AuditLog
 from models.user import User
+from models.employee import Employee
 from models import db
 
 audit_bp = Blueprint("audit", __name__)
 
-# 🔹 Helplers for UI Formatting
-def _get_module(entity):
-    mapping = {
-        'User': 'Auth',
-        'AUTH': 'Auth',
-        'Employee': 'Employee',
-        'Attendance': 'Employee',
-        'LeaveRequest': 'Employee',
-        'Leave': 'Employee',
-        'Shift': 'Employee',
-        'Payroll': 'Finance',
-        'Loan': 'Finance',
-        'Payslip': 'Finance',
-        'Company': 'Company',
-        'Branch': 'Company',
-        'Department': 'Company',
-        'Designation': 'Company'
-    }
-    return mapping.get(entity, 'System')
-
-def _format_entity_id(entity, eid):
-    if not eid: return "N/A"
-    prefixes = {
-        'Employee': 'EMP',
-        'Company': 'COMP',
-        'Document': 'DOC',
-        'Payroll': 'PAY',
-        'User': 'USR'
-    }
-    prefix = prefixes.get(entity, 'SYS')
-    return f"{prefix}-{eid}"
-
-def _generate_details(log, user):
-    act = log.action.upper()
-    ent = log.entity
-    role = log.role or "System"
-    
-    if "LOGIN" in act:
-        return f"Successful login to {role} Dashboard"
-    
-    # Try to extract name from meta if available
-    name = "Record"
-    import json
-    try:
-        if log.meta:
-            meta_dict = json.loads(log.meta.replace("'", '"')) if isinstance(log.meta, str) else log.meta
-            name = meta_dict.get('name') or meta_dict.get('full_name') or meta_dict.get('company_name') or name
-    except:
-        pass
-
-    if "CREATE" in act:
-        return f"Created new {ent}: {name}"
-    if "UPDATE" in act:
-        return f"Updated {ent} details for {name}"
-    if "DELETE" in act:
-        return f"Deleted {ent}: {name}"
-    
-    return f"Performed {act} on {ent}"
-
-# 🔹 Admin / HR / Super Admin
 @audit_bp.route("/api/audit/logs", methods=["GET"])
 @token_required
 def get_audit_logs():
-    # Role check
-    if g.user.role not in ['ADMIN', 'HR', 'SUPER_ADMIN', 'MANAGER']:
-        return jsonify({"message": "Unauthorized"}), 403
+    """
+    Retrieves audit logs based on a strict 5-tier access hierarchy:
+    1. Super Admin: All logs.
+    2. Admin: Company-wide (excludes other companies).
+    3. HR: Company Managers & Employees only.
+    4. Manager: Self and direct subordinates only.
+    5. Employee: Self logs only.
+    """
+    user = g.user
+    role = user.role.upper()
+    
+    print(f"[DEBUG] Audit Logs Request - User: {user.email}, Role: {role}, CoID: {user.company_id}")
+    
+    # Base query
+    query = AuditLog.query
 
-    query = db.session.query(AuditLog, User).outerjoin(User, AuditLog.user_id == User.id)
+    # --- 1. ACCESS HIERARCHY FILTERS ---
+    if role == "SUPER_ADMIN":
+        pass  # sees everything
+    elif role == "ADMIN":
+        query = query.filter(AuditLog.company_id == user.company_id)
+        # Note: If restricted strictly to "HR, Manager, Employee", then:
+        # query = query.filter(AuditLog.role.in_(['HR', 'MANAGER', 'EMPLOYEE']))
+    elif role == "HR":
+        query = query.filter(
+            AuditLog.company_id == user.company_id,
+            AuditLog.role.in_(['MANAGER', 'EMPLOYEE'])
+        )
+    elif role == "MANAGER":
+        manager_emp = Employee.query.filter_by(user_id=user.id).first()
+        if manager_emp:
+            subordinate_user_ids = [e.user_id for e in Employee.query.filter_by(manager_id=manager_emp.id).all() if e.user_id]
+            allowed_user_ids = [user.id] + subordinate_user_ids
+            query = query.filter(AuditLog.user_id.in_(allowed_user_ids))
+        else:
+            query = query.filter(AuditLog.user_id == user.id)
+    else: # Default to Employee level
+        query = query.filter(AuditLog.user_id == user.id)
 
-    # company isolation
-    if g.user.role != "SUPER_ADMIN":
-        query = query.filter(AuditLog.company_id == g.user.company_id)
-
-    # filters
+    # --- 2. QUERY PARAM FILTERS ---
     if request.args.get("user_id"):
         query = query.filter(AuditLog.user_id == request.args["user_id"])
     if request.args.get("action"):
         query = query.filter(AuditLog.action.ilike(f'%{request.args["action"]}%'))
-    if request.args.get("entity"):
-        query = query.filter(AuditLog.entity.ilike(f'%{request.args["entity"]}%'))
+    if request.args.get("module"):
+        query = query.filter(AuditLog.module.ilike(f'%{request.args["module"]}%'))
+    if request.args.get("status"):
+        query = query.filter(AuditLog.status == request.args["status"].upper())
     
-    # Manager Filter: Self and Subordinates only
-    if g.user.role == "MANAGER":
-        from models.employee import Employee
-        manager_emp = Employee.query.filter_by(user_id=g.user.id).first()
-        if manager_emp:
-            subordinate_user_ids = [e.user_id for e in Employee.query.filter_by(manager_id=manager_emp.id).all() if e.user_id]
-            allowed_user_ids = [g.user.id] + subordinate_user_ids
-            query = query.filter(AuditLog.user_id.in_(allowed_user_ids))
-        else:
-            # If no employee profile, see nothing
-            query = query.filter(AuditLog.id == -1)
-    
-    # Module filter
-    module_filter = request.args.get("module")
-    
+    # Time Optimizations
+    if request.args.get("year"):
+        query = query.filter(AuditLog.year == int(request.args["year"]))
+    if request.args.get("month"):
+        query = query.filter(AuditLog.month == int(request.args["month"]))
+    if request.args.get("day"):
+        query = query.filter(AuditLog.day == int(request.args["day"]))
+
+    # Pagination
     page = int(request.args.get("page", 1))
     limit = int(request.args.get("limit", 20))
-
-    all_logs = query.order_by(AuditLog.created_at.desc()).all()
     
-    data = []
-    for log, user in all_logs:
-        log_module = _get_module(log.entity)
-        if module_filter and module_filter.lower() != log_module.lower():
-            continue
-            
-        # Manager Module Check: Limit to modules they have access to
-        if g.user.role == "MANAGER":
-            from constants.permissions_registry import Permissions
-            authorized_modules = set()
-            perms = [p.permission_code for p in g.user.permissions]
-            
-            if Permissions.EMPLOYEE_VIEW in perms: authorized_modules.add('Employee')
-            if Permissions.PAYROLL_VIEW in perms: authorized_modules.add('Finance')
-            if Permissions.ATTENDANCE_VIEW in perms: authorized_modules.add('Employee')
-            if Permissions.LEAVE_VIEW in perms: authorized_modules.add('Employee')
-            
-            if log_module not in authorized_modules and log_module != 'Auth':
-                continue
-            
-        performer_name = "System"
-        if user:
-            performer_name = user.name
-        elif log.user_id:
-            performer_name = f"User {log.user_id}"
-
-        data.append({
-            "id": log.id,
-            "action": log.action,
-            "entity": log.entity,
-            "entity_id": _format_entity_id(log.entity, log.entity_id),
-            "performer_name": performer_name,
-            "role": log.role or (user.role if user else "SYSTEM"),
-            "date_time": log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else "N/A",
-            "ip_address": log.ip_address or "N/A",
-            "details": _generate_details(log, user),
-            "module": log_module
-        })
-
-    # Manual pagination after module filtering
-    total = len(data)
-    start = (page - 1) * limit
-    end = start + limit
-    paginated_data = data[start:end]
+    # Sort and Pagination
+    pagination = query.order_by(AuditLog.created_at.desc()).paginate(page=page, per_page=limit, error_out=False)
+    logs = pagination.items
+    
+    print(f"[DEBUG] Audit Logs Count: {len(logs)} / {pagination.total}")
 
     return jsonify({
         "success": True,
+        "total": pagination.total,
         "page": page,
         "limit": limit,
-        "total": total,
-        "data": paginated_data
+        "data": [{
+            "id": log.id,
+            "action": log.action,
+            "entity": log.entity,
+            "entity_id": log.reference_id or f"EID-{log.entity_id}",
+            "performed_by": log.user_name or "System",
+            "role": log.role,
+            "date_time": log.created_at.strftime('%Y-%m-%d %H:%M') if log.created_at else "N/A",
+            "ip_address": log.ip_address,
+            "details": log.description,
+            "module": log.module,
+            "status": log.status,
+            "old_data": log.old_data,
+            "new_data": log.new_data
+        } for log in logs]
     })
 
-
-# 🔹 Employee – My Logs
 @audit_bp.route("/api/audit/my-logs", methods=["GET"])
 @token_required
 def my_logs():
+    """
+    Simplified personal logs for the current user.
+    """
     logs = AuditLog.query \
         .filter(AuditLog.user_id == g.user.id) \
         .order_by(AuditLog.created_at.desc()) \
@@ -174,11 +114,9 @@ def my_logs():
         "success": True,
         "data": [{
             "action": l.action,
-            "entity": l.entity,
-            "entity_id": l.entity_id,
-            "method": l.method,
-            "path": l.path,
-            "status_code": l.status_code,
-            "created_at": l.created_at
+            "module": l.module,
+            "details": l.description,
+            "status": l.status,
+            "created_at": l.created_at.strftime('%Y-%m-%d %H:%M') if l.created_at else None
         } for l in logs]
     })

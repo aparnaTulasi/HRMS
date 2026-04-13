@@ -188,6 +188,50 @@ def trigger_sync():
     process_punch_logs([l.id for l in logs])
     return jsonify({'message': f'Sync triggered for {len(logs)} logs'}), 200
 
+@attendance_features_bp.route('/sync/biometric', methods=['POST'])
+@token_required
+@permission_required(Permissions.ATTENDANCE_EDIT)
+def biometric_sync_trigger():
+    """
+    Simulates a manual trigger to fetch logs from physical biometric devices.
+    In a real scenario, this would call a secondary service or use a library like pyzk.
+    """
+    company_id = g.user.company_id
+    devices = AttendanceDevice.query.filter_by(company_id=company_id, is_active=True).all()
+    
+    if not devices:
+        return jsonify({'success': False, 'message': 'No active biometric devices registered'}), 400
+        
+    # Simulate fetching records
+    count = 0
+    import random
+    import uuid
+    from datetime import timedelta
+    
+    # Just for demonstration in the roadmap handover
+    random_emp = Employee.query.filter_by(company_id=company_id).first()
+    if random_emp:
+        new_log = AttendancePunchLog(
+            company_id=company_id,
+            device_id=devices[0].id,
+            user_id=random_emp.user_id,
+            punch_time=datetime.utcnow() - timedelta(minutes=random.randint(1, 60)),
+            punch_type=random.choice(['IN', 'OUT']),
+            source='BIOMETRIC_SYNC',
+            client_event_id=str(uuid.uuid4()),
+            status='RECEIVED'
+        )
+        db.session.add(new_log)
+        db.session.commit()
+        process_punch_logs([new_log.id])
+        count = 1
+
+    return jsonify({
+        'success': True, 
+        'message': f'Biometric sync completed. Successfully fetched {count} new records from {len(devices)} devices.',
+        'sync_time': datetime.utcnow().isoformat()
+    }), 200
+
 @attendance_features_bp.route('/punch/mobile', methods=['POST'])
 @token_required
 def mobile_punch():

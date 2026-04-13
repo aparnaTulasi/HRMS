@@ -2,6 +2,8 @@ from datetime import datetime, timedelta
 from flask_login import UserMixin
 from models import db
 import secrets
+from constants.permissions import MODULES, ACTIONS, get_permission_code
+
 
 class User(UserMixin, db.Model):
     __tablename__ = 'users'
@@ -57,4 +59,65 @@ class User(UserMixin, db.Model):
         from utils.role_utils import normalize_role
         if normalize_role(self.role) == 'SUPER_ADMIN':
             return True
-        return any(p.permission_code == permission_code for p in self.permissions)
+        return permission_code in self.get_all_permissions()
+
+    def get_all_permissions(self):
+        """
+        Aggregates permissions from:
+        1. UserPermission table (Direct granular permissions)
+        2. RolePermission table (Inherited from the user's role)
+        """
+        from utils.role_utils import normalize_role
+        role_name = normalize_role(self.role)
+        
+        if role_name == 'SUPER_ADMIN':
+            from constants.permissions import ALL_PERMISSIONS
+            return ALL_PERMISSIONS
+
+        # 1. Direct permissions
+        direct_perms = [p.permission_code for p in self.permissions]
+
+        # 2. Inherited permissions from Role
+        from models.role import Role, RolePermission
+        role_obj = Role.query.filter_by(name=self.role, company_id=self.company_id).first()
+        inherited_perms = []
+        if role_obj:
+            inherited_perms = [rp.permission_code for rp in role_obj.permissions]
+
+        # Combine and remove duplicates
+        return list(set(direct_perms + inherited_perms))
+
+    def get_all_permissions_matrix(self):
+        """
+        Aggregates all permissions and groups them by module into a matrix format.
+        Format: {"Dashboard": ["View", "Create"], "Attendance": ["View"]}
+        """
+        all_codes = self.get_all_permissions()
+        
+        grouped = {}
+        for code in all_codes:
+            matched = False
+            for module in MODULES:
+                clean_module = module.upper().replace(" ", "_").replace("&", "AND")
+                if code.startswith(clean_module + "_"):
+                    raw_action = code.replace(clean_module + "_", "")
+                    matched_action = raw_action
+                    for a in ACTIONS:
+                        if a.upper() == raw_action:
+                            matched_action = a
+                            break
+                    
+                    if module not in grouped:
+                        grouped[module] = []
+                    if matched_action not in grouped[module]:
+                        grouped[module].append(matched_action)
+                    matched = True
+                    break
+            
+            if not matched:
+                if "Other" not in grouped:
+                    grouped["Other"] = []
+                if code not in grouped["Other"]:
+                    grouped["Other"].append(code)
+                
+        return grouped

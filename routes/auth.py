@@ -307,7 +307,7 @@ def login():
             'name': user.name,
             'company_id': user.company_id,
             'company_name': company.company_name if company else "System",
-            'permissions': [p.permission_code for p in UserPermission.query.filter_by(user_id=user.id).all()]
+            'permissions': user.get_all_permissions_matrix()
         },
         'redirect_url': redirect_url,
         'token': access_token,
@@ -332,7 +332,7 @@ def get_current_user():
         'name': user.name,
         'company_id': user.company_id,
         'company_name': company.company_name if company else None,
-        'permissions': [p.permission_code for p in UserPermission.query.filter_by(user_id=user.id).all()]
+        'permissions': user.get_all_permissions_matrix()
     }
 
     return jsonify(user_data), 200

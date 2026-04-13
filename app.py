@@ -19,7 +19,6 @@ logging.basicConfig(
 )
 
 # Import Blueprints
-# ... (rest of imports)
 from routes.auth import auth_bp
 from routes.admin import admin_bp
 from routes.superadmin import superadmin_bp
@@ -40,7 +39,7 @@ from routes.company import company_bp
 from routes.hr_documents import hr_docs_bp
 from routes.profile_routes import profile_bp
 from routes.profile_approval_routes import profile_approval_bp
-from routes.audit_log import audit_bp
+from routes.audit_logs import audit_bp
 from routes.support import support_bp
 from routes.calendar import calendar_bp
 from routes.assets import assets_bp
@@ -62,6 +61,7 @@ from routes.delegation_routes import delegation_bp
 from routes.document_center_routes import doc_center_bp
 from routes.main_routes import main_bp
 from routes.notification_routes import notification_bp
+from routes.employee_background import employee_bg_bp
 from routes.desk_routes import desk_bp
 from routes.document_center_routes import doc_center_bp
 
@@ -151,7 +151,18 @@ app.register_blueprint(delegation_bp, url_prefix='/api/delegation')
 app.register_blueprint(delegation_bp, url_prefix='/api/administration/delegations', name="delegation_mgmt_alias")
 app.register_blueprint(doc_center_bp, url_prefix='/api/document-center')
 app.register_blueprint(notification_bp, url_prefix='/api/notifications')
+app.register_blueprint(employee_bg_bp)
 app.register_blueprint(main_bp)
+
+@app.after_request
+def add_security_headers(response):
+    """Adds standard security headers to every response to fulfill Roadmap Day 59."""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+    return response
 
 @app.route('/')
 def home():

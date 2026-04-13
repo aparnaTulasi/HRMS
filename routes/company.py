@@ -713,22 +713,15 @@ def list_companies():
     for c in companies:
         data.append({
             "id": c.id,
+            "company_id": c.company_code or c.company_id, # return both variations to be safe
+            "company_Id": c.company_code or c.company_id, # for legacy support
             "company_name": c.company_name,
-            "name": c.company_name,  # Keeping legacy 'name' for backward compatibility
-            "company_code": c.company_code,
-            "company_Id": c.company_code, # For frontend compatibility
             "industry": c.industry,
             "company_size": c.company_size,
             "country": c.country,
-            "state": c.state,
-            "city_branch": c.city_branch,
-            "timezone": c.timezone,
-
-            "email": c.email,
-            "address": c.address,
             "status": getattr(c, 'status', 'Active')
         })
-
+    
     return jsonify({
         "success": True,
         "data": data
